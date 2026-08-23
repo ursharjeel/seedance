@@ -66,15 +66,15 @@ type TokenSession struct {
 	mu                   sync.RWMutex
 	refreshMu            sync.Mutex
 	cookiePersistHandler func(string)
-	FullCookie    string    // 完整的 cookie 字符串（用户从浏览器复制的）
-	SourceCookie  string    // 最近一次从持久化层读取的原始 Cookie；用于识别外部更新
-	JWT           string    // Cognito id_token (short-lived, ~1h)
-	JWTExpiry     time.Time // JWT expiration time
-	CognitoSub    string    // e.g. "5f2e877a-0c1a-4ea1-b893-bfb4a6567a22"
-	HasuraUserID  string    // e.g. "d5b484fd-1dcc-4cf5-a7a1-9ea83abd41ce"
-	Email         string
-	Plan          string
-	LastRefreshed time.Time
+	FullCookie           string    // 完整的 cookie 字符串（用户从浏览器复制的）
+	SourceCookie         string    // 最近一次从持久化层读取的原始 Cookie；用于识别外部更新
+	JWT                  string    // Cognito id_token (short-lived, ~1h)
+	JWTExpiry            time.Time // JWT expiration time
+	CognitoSub           string    // e.g. "5f2e877a-0c1a-4ea1-b893-bfb4a6567a22"
+	HasuraUserID         string    // e.g. "d5b484fd-1dcc-4cf5-a7a1-9ea83abd41ce"
+	Email                string
+	Plan                 string
+	LastRefreshed        time.Time
 }
 
 // CookieSnapshot returns the current cookie string, including any server
@@ -308,20 +308,11 @@ func parseHasuraClaims(raw string) (*hasuraClaims, error) {
 //   - Raw cookie header: "k1=v1; k2=v2; ..."
 //   - Just session_token value (legacy): "AlYJi..."
 func NormalizeCookie(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+	normalized, err := normalizeCookieInput(raw)
+	if err != nil {
 		return ""
 	}
-	// If it looks like a full cookie string (contains "=")
-	if strings.Contains(raw, "=") && strings.Contains(raw, ";") {
-		return raw
-	}
-	// If it looks like a single cookie value (no "="), assume it's session_token
-	if !strings.Contains(raw, "=") {
-		return "__Secure-better-auth.session_token=" + raw
-	}
-	// Could be a single k=v pair without semicolons
-	return raw
+	return normalized
 }
 
 // mergeResponseCookies keeps the browser session current when Better Auth
@@ -441,7 +432,20 @@ func (c *Client) RefreshSession(session *TokenSession) error {
 	req.Close = true
 
 	// 发送完整 cookie 字符串，包含所有必要的 cookie
-	cookieStr := NormalizeCookie(session.CookieSnapshot())
+	rawCookie := session.CookieSnapshot()
+	cookieStr, err := normalizeCookieInput(rawCookie)
+	if err != nil || cookieStr == "" {
+		if err == nil {
+			err = fmt.Errorf("cookie is empty")
+		}
+		return fmt.Errorf("normalize cookie: %w", err)
+	}
+	if cookieStr != rawCookie {
+		session.mu.Lock()
+		session.FullCookie = cookieStr
+		session.mu.Unlock()
+		session.notifyCookieRotated(cookieStr)
+	}
 	req.Header.Set("Cookie", cookieStr)
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")

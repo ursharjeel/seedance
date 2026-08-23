@@ -103,3 +103,27 @@ func TestGenerationRetryActionDisabled(t *testing.T) {
 		t.Fatal("disabled policy retried an async submission error")
 	}
 }
+
+func TestGenerationAuthenticationErrorClassification(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "graphql 401", err: errors.New("graphql returned 401: unauthorized"), want: true},
+		{name: "expired jwt", err: errors.New("could not verify JWT: JWT expired"), want: true},
+		{name: "missing jwt", err: errors.New("no JWT found in session response"), want: true},
+		{name: "generic provider error", err: errors.New("generate error: An error occurred."), want: false},
+		{name: "invalid request", err: errors.New("generate error: invalid dimensions"), want: false},
+		{name: "rate limit", err: errors.New("graphql returned 429"), want: false},
+		{name: "transport", err: errors.New("graphql request failed: unexpected EOF"), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isGenerationAuthenticationError(tt.err); got != tt.want {
+				t.Fatalf("isGenerationAuthenticationError(%q) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}

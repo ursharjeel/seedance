@@ -119,6 +119,9 @@ func main() {
 	mux.HandleFunc("/v1/video/generations/", srv.HandleVideoGenerationStatus)
 	mux.HandleFunc("/v1/video/async-generations", srv.HandleVideoGeneration)
 	mux.HandleFunc("/v1/video/async-generations/", srv.HandleVideoGenerationStatus)
+	// OpenAI Videos API aliases used by gateways such as New API.
+	mux.HandleFunc("/v1/videos", srv.HandleOpenAIVideo)
+	mux.HandleFunc("/v1/videos/", srv.HandleOpenAIVideo)
 	mux.HandleFunc("/health", srv.HandleHealth)
 
 	// ─── Admin auth ───

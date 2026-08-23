@@ -9,6 +9,7 @@
 config/app.db
 config/request_logs.json
 config/config.json
+config/config.json.bak-*
 
 # Generated files
 generated/

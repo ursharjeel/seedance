@@ -208,13 +208,18 @@ func (s *Server) HandleTokenAdd(w http.ResponseWriter, r *http.Request) {
 	if tokenType == "" {
 		tokenType = "session_token"
 	}
+	normalizedToken := leonardo.NormalizeCookie(body.Token)
+	if normalizedToken == "" {
+		writeJSON(w, 400, map[string]string{"detail": "invalid or empty Leonardo cookie"})
+		return
+	}
 
 	// For Leonardo tokens, save first then try to validate in background
 	if platform == "leonardo" {
 		if body.Source == "" {
 			body.Source = "manual"
 		}
-		info, duplicate, addErr := s.TokenMgr.Add(body.Token, platform, tokenType, body.AccountName, body.AccountEmail, body.Source)
+		info, duplicate, addErr := s.TokenMgr.Add(normalizedToken, platform, tokenType, body.AccountName, body.AccountEmail, body.Source)
 		if addErr != nil {
 			writeJSON(w, 500, map[string]string{"detail": addErr.Error()})
 			return
@@ -227,7 +232,7 @@ func (s *Server) HandleTokenAdd(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.LeonardoClient != nil {
 			if tokenID, _ := info["id"].(string); tokenID != "" {
-				go s.validateLeonardoTokenAsync(tokenID, body.Token)
+				go s.validateLeonardoTokenAsync(tokenID, normalizedToken)
 			}
 		} else {
 			leoInfo["status"] = "saved_without_validation"
@@ -399,8 +404,13 @@ func (s *Server) HandleTokenBatchAdd(w http.ResponseWriter, r *http.Request) {
 			failed++
 			continue
 		}
+		normalizedToken := leonardo.NormalizeCookie(t.Token)
+		if normalizedToken == "" {
+			failed++
+			continue
+		}
 		tokenType := "session_token"
-		_, dup, err := s.TokenMgr.Add(t.Token, platform, tokenType, t.AccountName, t.AccountEmail, t.Source)
+		_, dup, err := s.TokenMgr.Add(normalizedToken, platform, tokenType, t.AccountName, t.AccountEmail, t.Source)
 		if err != nil {
 			failed++
 			continue
@@ -1569,11 +1579,7 @@ func (s *Server) importCookiesToTokenPool(inputs []cookieImportInput, source str
 }
 
 func normalizeImportedCookie(raw string) string {
-	value := strings.TrimSpace(raw)
-	if strings.HasPrefix(strings.ToLower(value), "cookie:") {
-		value = strings.TrimSpace(value[7:])
-	}
-	return value
+	return leonardo.NormalizeCookie(raw)
 }
 
 func newCookieImportJob(inputs []cookieImportInput) *cookieImportJob {

@@ -1392,7 +1392,7 @@ func (s *Server) submitLeonardoVideoGeneration(session *leonardo.TokenSession, u
 			Message:         fmt.Sprintf("generation failed: %v", err),
 			ErrorType:       "server_error",
 			RetryCodeSource: extractRetryCodeSource(err.Error()),
-			MarkInvalid:     !insufficientTokens && !isRetryableGenerationError(err),
+			MarkInvalid:     isGenerationAuthenticationError(err),
 			Insufficient:    insufficientTokens,
 		}
 	}
@@ -1943,6 +1943,21 @@ func isRetryableGenerationError(err error) bool {
 		strings.Contains(msg, "returned 429") ||
 		strings.Contains(msg, "(429)") ||
 		strings.Contains(msg, "proxy")
+}
+
+func isGenerationAuthenticationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "graphql returned 401") ||
+		strings.Contains(msg, "returned 401") ||
+		strings.Contains(msg, "(401)") ||
+		strings.Contains(msg, "unauthorized") ||
+		strings.Contains(msg, "could not verify jwt") ||
+		strings.Contains(msg, "invalid jwt") ||
+		strings.Contains(msg, "jwt expired") ||
+		strings.Contains(msg, "no jwt found in session response")
 }
 
 func isIntrinsicRetryableAsyncSubmissionError(err error) bool {
