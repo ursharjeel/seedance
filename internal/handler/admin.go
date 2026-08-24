@@ -3072,6 +3072,10 @@ func (s *Server) uploadLeonardoAudioBytes(session *leonardo.TokenSession, audioD
 }
 
 func (s *Server) downloadRemoteImage(remoteURL string) ([]byte, string, string, error) {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(remoteURL)), "data:") {
+		imageData, contentType, ext, _, err := decodeInlineMediaURL(remoteURL, maxRemoteImageBytes, "image/")
+		return imageData, contentType, ext, err
+	}
 	parsedURL, err := url.Parse(strings.TrimSpace(remoteURL))
 	if err != nil {
 		return nil, "", "", fmt.Errorf("invalid image url: %w", err)
@@ -3159,6 +3163,13 @@ func (s *Server) downloadRemoteImage(remoteURL string) ([]byte, string, string, 
 }
 
 func (s *Server) downloadRemoteVideo(remoteURL string) ([]byte, string, string, float64, error) {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(remoteURL)), "data:") {
+		videoData, contentType, ext, _, err := decodeInlineMediaURL(remoteURL, maxRemoteVideoBytes, "video/")
+		if err != nil {
+			return nil, "", "", 0, err
+		}
+		return videoData, contentType, ext, detectRemoteVideoDuration(videoData, contentType, ext), nil
+	}
 	parsedURL, err := url.Parse(strings.TrimSpace(remoteURL))
 	if err != nil {
 		return nil, "", "", 0, fmt.Errorf("invalid video url: %w", err)
@@ -3247,6 +3258,9 @@ func (s *Server) downloadRemoteVideo(remoteURL string) ([]byte, string, string, 
 }
 
 func (s *Server) downloadRemoteAudio(remoteURL string) ([]byte, string, string, string, error) {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(remoteURL)), "data:") {
+		return decodeInlineMediaURL(remoteURL, maxRemoteAudioBytes, "audio/")
+	}
 	parsedURL, err := url.Parse(strings.TrimSpace(remoteURL))
 	if err != nil {
 		return nil, "", "", "", fmt.Errorf("invalid audio url: %w", err)

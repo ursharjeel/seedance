@@ -277,7 +277,7 @@ MiniMax H3 默认使用 2K。`size` 和 Leonardo 上游参数均按输出视频�
 | `image_urls` | 多张远程图片 URL 数组 |
 | `image_guidance` | 图片对象数组，可传 `url`、`strength` |
 
-远程图片会先上传到 Leonardo，再转换为 `guidances.image_reference`。
+远程图片会先上传到 Leonardo，再转换为 `guidances.image_reference`。浏览器传入的 `data:` 图片 URL 也会先解码并上传。
 
 除 `sora2` 外，`image_url` 默认都是图片参考；`sora2` 为兼容旧格式，会把 `image_url` 当作首帧。
 
@@ -299,7 +299,7 @@ MiniMax H3 默认使用 2K。`size` 和 Leonardo 上游参数均按输出视频�
 
 顶层 `duration` 是生成结果时长，`video_reference[].duration` 是参考视频本身的时长。
 
-对于远程视频，服务会下载素材、上传到 Leonardo、等待 `uploaded_media.status=COMPLETE`，并尽量自动读取源视频时长。上游要求参考视频宽高处于 720px–2160px 范围内；不符合时需先转码、缩放或补边。
+对于远程或浏览器内联视频，服务会准备素材、上传到 Leonardo、等待 `uploaded_media.status=COMPLETE`，并尽量自动读取源视频时长。上游要求参考视频宽高处于 720px–2160px 范围内；不符合时需先转码、缩放或补边。
 
 ### 音频参考
 
@@ -308,7 +308,7 @@ MiniMax H3 默认使用 2K。`size` 和 Leonardo 上游参数均按输出视频�
 | `audio_url` | 单个远程音频 |
 | `audio_reference` | 音频对象数组，可传 `url`、`duration` |
 
-远程音频支持 `mp3`、`wav`、`m4a`、`aac`、`ogg`、`webm`。服务会上传音频、等待素材就绪，并尽量读取参考音频时长。
+远程或浏览器内联音频支持 `mp3`、`wav`、`m4a`、`aac`、`ogg`、`webm`。`data:audio/...;base64,...` 会先解码，再上传音频、等待素材就绪，并尽量读取参考音频时长。
 
 ## 调用示例
 
