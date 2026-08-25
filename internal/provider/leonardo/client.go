@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -802,6 +803,19 @@ const generateMutation = `mutation Generate($request: CreateGenerationRequest!) 
   }
 }`
 
+const seedance25GenerateMutation = `mutation Generate($request: CreateGenerationRequest!) {
+  generate(request: $request) {
+    apiCreditCost
+    generationId
+    cost {
+      amount
+      unit
+      __typename
+    }
+    __typename
+  }
+}`
+
 const statusQuery = `query GetAIGenerationFeedStatuses($where: generations_bool_exp = {}) {
   generations(where: $where) {
     id
@@ -902,6 +916,8 @@ type GenerateParams struct {
 type GenerateResponse struct {
 	GenerationID  string `json:"generationId"`
 	APICreditCost int    `json:"apiCreditCost"`
+	CostAmount    string `json:"costAmount,omitempty"`
+	CostUnit      string `json:"costUnit,omitempty"`
 }
 
 // GenerationStatus holds the status of a generation.
@@ -944,6 +960,9 @@ func inferResolutionModeForModel(modelID string, width int, height int) string {
 	if isSeedance480pModel(modelID) {
 		return ""
 	}
+	if isSeedance25Model(modelID) {
+		return ""
+	}
 	return inferResolutionMode(width, height)
 }
 
@@ -973,6 +992,22 @@ func isSeedance480pModel(modelID string) bool {
 	default:
 		return false
 	}
+}
+
+func isSeedance25Model(modelID string) bool {
+	switch strings.TrimSpace(modelID) {
+	case "seedance-2.5", "video-2.5", "bytedance/seedance-2.5":
+		return true
+	default:
+		return false
+	}
+}
+
+func seedanceUpstreamModel(modelID string) string {
+	if isSeedance25Model(modelID) {
+		return "bytedance/seedance-2.5"
+	}
+	return seedance480pUpstreamModel(modelID)
 }
 
 func seedance480pUpstreamModel(modelID string) string {
@@ -1099,6 +1134,9 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 	if strings.EqualFold(genReq.Model, "minimax-h3") {
 		genReq.Model = "hailuo-03"
 	}
+	if isSeedance25Model(genReq.Model) {
+		genReq.Model = "seedance-2.5"
+	}
 	isKlingO3VideoRefMode := isKlingO3Model(genReq.Model) && len(genReq.Params.VideoRefs) > 0
 	if genReq.Params.Width == 0 {
 		if isKlingO3VideoRefMode {
@@ -1149,6 +1187,9 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 	}
 	if genReq.Params.Duration == 0 && isMinimaxH3Model(genReq.Model) {
 		genReq.Params.Duration = 5
+	}
+	if genReq.Params.Duration == 0 && isSeedance25Model(genReq.Model) {
+		genReq.Params.Duration = 4
 	}
 	if genReq.Params.Duration == 0 {
 		genReq.Params.Duration = 4
@@ -1213,6 +1254,14 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 			return nil, fmt.Errorf("seedance 480p size must be 496x864, 864x496, or 640x640")
 		}
 	}
+	if isSeedance25Model(genReq.Model) {
+		if genReq.Params.Duration != 4 {
+			return nil, fmt.Errorf("seedance 2.5 currently supports only 4 seconds")
+		}
+		if genReq.Params.Width != 1280 || genReq.Params.Height != 720 {
+			return nil, fmt.Errorf("seedance 2.5 currently supports only 1280x720")
+		}
+	}
 
 	params := map[string]interface{}{}
 	if isSora2Model(genReq.Model) {
@@ -1242,6 +1291,16 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 			"motion_has_audio": genReq.Params.MotionHasAudio,
 			"quantity":         genReq.Params.Quantity,
 			"prompt":           genReq.Params.Prompt,
+		}
+	} else if isSeedance25Model(genReq.Model) {
+		params = map[string]interface{}{
+			"prompt":           genReq.Params.Prompt,
+			"quantity":         genReq.Params.Quantity,
+			"duration":         genReq.Params.Duration,
+			"motion_has_audio": genReq.Params.MotionHasAudio,
+			"width":            genReq.Params.Width,
+			"height":           genReq.Params.Height,
+			"seed":             genReq.Params.Seed,
 		}
 	} else {
 		params = map[string]interface{}{
@@ -1395,7 +1454,11 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 		params["guidances"] = guidances
 	}
 
-	requestModel := seedance480pUpstreamModel(genReq.Model)
+	requestModel := seedanceUpstreamModel(genReq.Model)
+	query := generateMutation
+	if isSeedance25Model(genReq.Model) {
+		query = seedance25GenerateMutation
+	}
 	gqlReq := graphqlRequest{
 		OperationName: "Generate",
 		Variables: map[string]interface{}{
@@ -1405,7 +1468,7 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 				"parameters": params,
 			},
 		},
-		Query: generateMutation,
+		Query: query,
 	}
 
 	body, err := c.doGraphQL(jwt, gqlReq)
@@ -1418,6 +1481,10 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 			Generate struct {
 				APICreditCost int    `json:"apiCreditCost"`
 				GenerationID  string `json:"generationId"`
+				Cost          struct {
+					Amount string `json:"amount"`
+					Unit   string `json:"unit"`
+				} `json:"cost"`
 			} `json:"generate"`
 		} `json:"data"`
 		Errors []struct {
@@ -1432,13 +1499,21 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 	if len(gqlResp.Errors) > 0 {
 		return nil, fmt.Errorf("generate error: %s", gqlResp.Errors[0].Message)
 	}
+	creditCost := gqlResp.Data.Generate.APICreditCost
+	if creditCost <= 0 && strings.TrimSpace(gqlResp.Data.Generate.Cost.Amount) != "" {
+		if parsed, parseErr := strconv.Atoi(strings.TrimSpace(gqlResp.Data.Generate.Cost.Amount)); parseErr == nil {
+			creditCost = parsed
+		}
+	}
 
 	log.Printf("[Leonardo] Generation submitted: id=%s, cost=%d tokens",
-		gqlResp.Data.Generate.GenerationID, gqlResp.Data.Generate.APICreditCost)
+		gqlResp.Data.Generate.GenerationID, creditCost)
 
 	return &GenerateResponse{
 		GenerationID:  gqlResp.Data.Generate.GenerationID,
-		APICreditCost: gqlResp.Data.Generate.APICreditCost,
+		APICreditCost: creditCost,
+		CostAmount:    gqlResp.Data.Generate.Cost.Amount,
+		CostUnit:      gqlResp.Data.Generate.Cost.Unit,
 	}, nil
 }
 

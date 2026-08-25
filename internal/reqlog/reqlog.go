@@ -305,6 +305,48 @@ func (s *Store) UpdateRetryByGenerationID(genID string, upstreamGenerationID str
 	return false
 }
 
+// UpdateSubmissionByGenerationID records the upstream submission details for
+// a client-facing job that was acknowledged before preparation completed.
+func (s *Store) UpdateSubmissionByGenerationID(genID, upstreamGenerationID, tokenID, accountName, accountEmail, model, modelParams string, creditCost, tokenAttempt int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := range s.entries {
+		if s.entries[i].GenerationID != genID {
+			continue
+		}
+		s.entries[i].UpstreamGenerationID = strings.TrimSpace(upstreamGenerationID)
+		if strings.TrimSpace(tokenID) != "" {
+			s.entries[i].TokenID = strings.TrimSpace(tokenID)
+		}
+		if strings.TrimSpace(accountName) != "" {
+			s.entries[i].AccountName = strings.TrimSpace(accountName)
+		}
+		if strings.TrimSpace(accountEmail) != "" {
+			s.entries[i].AccountEmail = strings.TrimSpace(accountEmail)
+		}
+		if strings.TrimSpace(model) != "" {
+			s.entries[i].Model = strings.TrimSpace(model)
+		}
+		if strings.TrimSpace(modelParams) != "" {
+			s.entries[i].ModelParams = strings.TrimSpace(modelParams)
+		}
+		if creditCost > 0 {
+			s.entries[i].CreditCost = creditCost
+		}
+		if tokenAttempt > 0 {
+			s.entries[i].TokenAttempt = tokenAttempt
+		}
+		s.entries[i].TaskStatus = "IN_PROGRESS"
+		s.entries[i].StatusCode = 202
+		s.entries[i].ErrorCode = ""
+		s.entries[i].ErrorMessage = ""
+		s.save()
+		return true
+	}
+	return false
+}
+
 // UpdateAttemptByGenerationID records a retry submission attempt even when the
 // upstream request fails before a replacement generation ID is returned.
 func (s *Store) UpdateAttemptByGenerationID(genID string, tokenAttempt int) bool {

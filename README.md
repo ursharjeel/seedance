@@ -13,7 +13,7 @@
 ## ✨ 特性
 
 - ✅ **OpenAI 风格接口**：`POST /v1/video/generations` 一行接入，SDK/curl 直接替换 Base URL
-- ✅ **多模型反代**：`video-2.0`（seedance-2.0）、`sora2`、`ko3`（kling-o3）、`minimax-h3`（hailuo-03）
+- ✅ **多模型反代**：`video-2.5`（Seedance 2.5 verified profile）、`video-2.0`（seedance-2.0）、`sora2`、`ko3`（kling-o3）、`minimax-h3`（hailuo-03）
 - ✅ **Token 池自动调度**：轮换策略（round_robin / random）、单 Token 并发上限、积分门槛跳过
 - ✅ **自动保活**：JWT 到期前自动刷新，账号长期在线，无需人工干预
 - ✅ **额度管理**：积分实时检测、额度耗尽自动禁用/清理、失败任务积分结算回补
@@ -114,7 +114,7 @@ curl -X POST http://127.0.0.1:8787/v1/video/generations \
   }'
 ```
 
-提交成功返回 `202 Accepted`。生成是异步的，需要使用响应中的 `poll_url` 查询结果。
+提交成功返回 `202 Accepted`。生成是异步的，需要使用响应中的 `poll_url` 查询结果。服务会先确认任务并立即返回，再在后台完成 token 刷新、参考素材上传和 Leonardo 提交；因此远程参考素材较慢时也不会让反向代理请求一直等待。
 
 ## 公共 API
 
@@ -145,6 +145,7 @@ curl http://127.0.0.1:8787/v1/models \
 
 | 推荐模型名 | 上游模型 | 默认时长 | 默认尺寸 | 支持时长 | 参考能力 |
 | --- | --- | ---: | --- | --- | --- |
+| `video-2.5` | `bytedance/seedance-2.5` | 4 秒 | `1280x720` | 4 秒 | 当前已验证配置：文生视频，支持参考素材参数 |
 | `video-2.0` | `seedance-2.0` | 10 秒 | `1280x720` | 4–15 秒 | 图片、首尾帧、视频、音频 |
 | `video-2.0-fast` | `seedance-2.0-fast` | 10 秒 | `1280x720` | 4–15 秒 | 图片、首尾帧、视频、音频 |
 | `video-2.0-mini` | `seedance-2.0-mini` | 10 秒 | `1280x720` | 4–15 秒 | 图片、首尾帧、视频、音频 |
@@ -163,6 +164,7 @@ curl http://127.0.0.1:8787/v1/models \
 
 | 推荐模型名 | 兼容别名 |
 | --- | --- |
+| `video-2.5` | `seedance-2.5` |
 | `video-2.0` | `seedance-2.0` |
 | `video-2.0-fast` | `seedance-2.0-fast` |
 | `video-2.0-mini` | `seedance-2.0-mini` |
@@ -225,7 +227,7 @@ MiniMax H3 默认使用 2K。`size` 和 Leonardo 上游参数均按输出视频�
 - 不传图片时为文生视频。
 - `image_url`、`image_urls` 或 `image_guidance` 均为图片参考模式。
 - 即使只上传一张图片，也使用图片参考模式，不会自动当作首帧。
-- 图片参考最多 5 张，默认 `strength=MID`。
+- 图片参考最多 9 张，默认 `strength=MID`。当输入超过 Leonardo 部署的 4 个独立参考图上限时，Leo2API 会把 URL 图片按每组 3 张拼接为最多 3 个合成参考图后再上传；ID-only 图片无法执行该兼容转换。
 - 只有明确传入 `start_image_url`、`start_frame`、`end_image_url` 或 `end_frame` 时才进入首尾帧模式。
 - 图片参考模式与首尾帧模式不能混用。
 - 音频参考必须和至少一张图片参考一起使用。
@@ -266,6 +268,7 @@ MiniMax H3 默认使用 2K。`size` 和 Leonardo 上游参数均按输出视频�
 | `width` | integer | 否 | 显式输出宽度 |
 | `height` | integer | 否 | 显式输出高度 |
 | `async` | boolean | 否 | 兼容字段；接口始终异步提交 |
+| `disable_audio` | boolean | 否 | 设为 `true` 时向 Leonardo 发送 `motion_has_audio=false`；默认保留音频 |
 
 尺寸覆盖优先级为：`width` / `height` 高于 `size`，`size` 高于 `aspect_ratio`，最后才使用模型默认值。
 

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"leo2api/internal/config"
 	"leo2api/internal/provider/leonardo"
 	"leo2api/internal/reqlog"
@@ -17,6 +18,17 @@ import (
 )
 
 var openAIModelCatalog = []map[string]interface{}{
+	{
+		"id":          "video-2.5",
+		"object":      "model",
+		"owned_by":    "leonardo",
+		"description": "Seedance 2.5 video generation (verified 4-second 720p profile)",
+		"aliases":     []string{"seedance-2.5"},
+		"parameters": map[string]interface{}{
+			"duration": []int{4},
+			"size":     []string{"1280x720"},
+		},
+	},
 	{
 		"id":          "video-2.0",
 		"object":      "model",
@@ -127,6 +139,7 @@ const (
 	generationJWTMinimumRemaining   = 5 * time.Minute
 	sora2RequiredCredits            = 1200
 	video2RequiredCredits           = 4550
+	seedance25RequiredCredits       = 1200 // verified cost is 1168; keep the existing 1200 selection floor
 	video2FastRequiredCredits       = 3650
 	video2MiniRequiredCredits       = 2400
 	video2Required480pCredits       = 2150
@@ -204,9 +217,10 @@ type videoGenerationAttemptFailure struct {
 }
 
 type videoGenerationSubmission struct {
-	GenerationID string
-	CreatedAt    time.Time
-	Request      *leonardo.GenerateRequest
+	UpstreamGenerationID string
+	CreatedAt            time.Time
+	Request              *leonardo.GenerateRequest
+	CreditCost           int
 }
 
 type asyncVideoGenerationContext struct {
@@ -316,7 +330,7 @@ func (s *Server) HandleVideoGeneration(w http.ResponseWriter, r *http.Request) {
 	}
 	modelID, ok := normalizeVideoModelID(requestedModelID)
 	if !ok {
-		writeJSON(w, 400, errorResp("unsupported model; available models are video-2.0, video-2.0-fast, video-2.0-mini, their 480p variants, sora2, ko3, and minimax-h3", "invalid_request_error"))
+		writeJSON(w, 400, errorResp("unsupported model; available models are video-2.5, video-2.0, video-2.0-fast, video-2.0-mini, their 480p variants, sora2, ko3, and minimax-h3", "invalid_request_error"))
 		return
 	}
 	responseModelID := publicVideoModelID(modelID)
@@ -355,6 +369,10 @@ func (s *Server) HandleVideoGeneration(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 400, errorResp("duration must be between 4 and 15 seconds", "invalid_request_error"))
 			return
 		}
+	}
+	if isSeedance25ModelID(modelID) && duration != 4 {
+		writeJSON(w, 400, errorResp("seedance 2.5 currently supports only 4 seconds", "invalid_request_error"))
+		return
 	}
 
 	// Parse size (e.g. "1280x720")
@@ -407,6 +425,10 @@ func (s *Server) HandleVideoGeneration(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, errorResp("seedance 480p size must be 496x864, 864x496, or 640x640", "invalid_request_error"))
 		return
 	}
+	if isSeedance25ModelID(modelID) && !isAllowedSeedance25Size(width, height) {
+		writeJSON(w, 400, errorResp("seedance 2.5 currently supports only 1280x720", "invalid_request_error"))
+		return
+	}
 	if isMinimaxH3ModelID(modelID) && !isAllowedMinimaxH3Size(width, height) {
 		writeJSON(w, 400, errorResp("minimax-h3 size must be one of 2560x1440, 1440x2560, 1440x1440, 1920x1440, 1440x1920, or 3360x1440", "invalid_request_error"))
 		return
@@ -416,12 +438,42 @@ func (s *Server) HandleVideoGeneration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	publicGenerationID := uuid.NewString()
+	createdAt := time.Now()
+	if s.ReqLog != nil {
+		s.ReqLog.Add(reqlog.Entry{
+			Timestamp: float64(createdAt.Unix()), StatusCode: http.StatusAccepted,
+			TaskStatus: "IN_PROGRESS", Type: "video", Model: publicVideoModelID(modelID),
+			ModelParams: videoModelParams(modelID, width, height, duration), Prompt: prompt,
+			GenerationID: publicGenerationID, UpstreamGenerationID: publicGenerationID,
+			Operation: "openai.video.generate",
+		})
+	}
+	go s.processVideoGeneration(data, publicGenerationID, createdAt, prompt, modelID, duration, width, height, klingO3VideoRefMode)
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{
+		"id": publicGenerationID, "object": "video.generation", "created": createdAt.Unix(),
+		"model": responseModelID, "status": "in_progress",
+		"poll_url": videoGenerationPollURL(r.URL.Path, publicGenerationID), "request_id": publicGenerationID,
+	})
+}
+
+// processVideoGeneration performs token preparation, reference uploads, and
+// Leonardo submission outside the HTTP request. Cloudflare (and other proxies)
+// can therefore receive the 202 acknowledgement immediately even when an
+// uploaded reference takes minutes to fetch or stage.
+func (s *Server) processVideoGeneration(data map[string]interface{}, publicGenerationID string, createdAt time.Time, prompt, modelID string, duration, width, height int, klingO3VideoRefMode bool) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			s.markVideoGenerationFailure(publicGenerationID, http.StatusInternalServerError, fmt.Sprintf("generation worker failed: %v", recovered), createdAt)
+		}
+	}()
+
 	retryPolicy := s.loadGenerationRetryPolicy()
 	triedTokenIDs := make(map[string]bool)
 	var lastFailure *videoGenerationAttemptFailure
 	var lastTokenID string
 	var lastSession *leonardo.TokenSession
-	var lastAttempt int
+	motionHasAudio := motionHasAudioFromRequest(data)
 
 	maxAttempts := retryPolicy.MaxAttempts
 	if s != nil && s.TokenMgr != nil {
@@ -435,25 +487,26 @@ func (s *Server) HandleVideoGeneration(w http.ResponseWriter, r *http.Request) {
 			if lastFailure != nil {
 				break
 			}
-			s.logVideoRequestFailure("openai.video.generate", prompt, modelID, duration, width, height, usedTokenID, session, attempt, 503, "No tokens available")
-			writeJSON(w, 503, errorResp("No tokens available", "server_error"))
+			s.markVideoGenerationFailure(publicGenerationID, http.StatusServiceUnavailable, "No tokens available", createdAt)
 			return
 		}
 
-		imageRefs, startFrames, endFrames, videoRefs, audioRefs, err := s.resolveOpenAIVideoGuidanceInputs(data, session, modelID)
+		var imageRefs []leonardo.ImageRef
+		var startFrames []leonardo.FrameRef
+		var endFrames []leonardo.FrameRef
+		var videoRefs []leonardo.VideoRef
+		var audioRefs []leonardo.AudioRef
+		var err error
+		guidanceData, guidancePackErr := s.maybePackOpenAIImageReferences(data, session, modelID)
+		if guidancePackErr != nil {
+			err = guidancePackErr
+		} else {
+			imageRefs, startFrames, endFrames, videoRefs, audioRefs, err = s.resolveOpenAIVideoGuidanceInputs(guidanceData, session, modelID)
+		}
 		if err != nil {
 			if isRetryableGuidancePreparationError(err) {
-				failure := &videoGenerationAttemptFailure{
-					StatusCode:      http.StatusBadRequest,
-					Message:         err.Error(),
-					ErrorType:       "invalid_request_error",
-					RetryCodeSource: extractRetryCodeSource(err.Error()),
-				}
-				lastFailure = failure
-				lastTokenID = usedTokenID
-				lastSession = session
-				lastAttempt = attempt
-
+				failure := &videoGenerationAttemptFailure{StatusCode: http.StatusBadRequest, Message: err.Error(), ErrorType: "invalid_request_error", RetryCodeSource: extractRetryCodeSource(err.Error())}
+				lastFailure, lastTokenID, lastSession = failure, usedTokenID, session
 				if attempt < retryPolicy.MaxAttempts {
 					triedTokenIDs[usedTokenID] = true
 					if s.TokenMgr != nil && usedTokenID != "" {
@@ -470,50 +523,34 @@ func (s *Server) HandleVideoGeneration(w http.ResponseWriter, r *http.Request) {
 					s.TokenMgr.ReportFail(usedTokenID)
 				}
 				releaseTokenPreparation()
-				s.logVideoRequestFailure("openai.video.generate", prompt, modelID, duration, width, height, usedTokenID, session, attempt, failure.StatusCode, failure.Message)
-				writeJSON(w, failure.StatusCode, errorResp(failure.Message, failure.ErrorType))
+				s.markVideoGenerationFailure(publicGenerationID, failure.StatusCode, failure.Message, createdAt)
 				return
 			}
 			releaseTokenPreparation()
-			s.logVideoRequestFailure("openai.video.generate", prompt, modelID, duration, width, height, usedTokenID, session, attempt, 400, err.Error())
-			writeJSON(w, 400, errorResp(err.Error(), "invalid_request_error"))
+			s.markVideoGenerationFailure(publicGenerationID, http.StatusBadRequest, err.Error(), createdAt)
 			return
 		}
 
-		submission, failure := s.submitLeonardoVideoGeneration(session, usedTokenID, attempt, prompt, modelID, duration, width, height, imageRefs, startFrames, endFrames, videoRefs, audioRefs)
+		submission, failure := s.submitLeonardoVideoGeneration(session, usedTokenID, attempt, prompt, modelID, duration, width, height, motionHasAudio, imageRefs, startFrames, endFrames, videoRefs, audioRefs)
 		if failure == nil {
 			releaseTokenPreparation()
+			accountName, accountEmail := s.resolveReqLogAccount(usedTokenID, session)
+			if s.ReqLog != nil {
+				s.ReqLog.UpdateSubmissionByGenerationID(publicGenerationID, submission.UpstreamGenerationID, usedTokenID, accountName, accountEmail, publicVideoModelID(modelID), videoModelParams(modelID, width, height, duration), submission.CreditCost, attempt)
+			}
 			attemptTimeout := 10 * time.Minute
 			if s.Config != nil {
 				attemptTimeout = time.Duration(s.Config.GetInt("generate_timeout", 600)) * time.Second
 			}
 			go s.trackLeonardoVideoGeneration(&asyncVideoGenerationContext{
-				Session:              session,
-				TokenID:              usedTokenID,
-				ModelID:              modelID,
-				PublicGenerationID:   submission.GenerationID,
-				UpstreamGenerationID: submission.GenerationID,
-				Request:              submission.Request,
-				Attempt:              attempt,
-				StartedAt:            submission.CreatedAt,
+				Session: session, TokenID: usedTokenID, ModelID: modelID,
+				PublicGenerationID: publicGenerationID, UpstreamGenerationID: submission.UpstreamGenerationID,
+				Request: submission.Request, Attempt: attempt, StartedAt: createdAt,
 			}, 5*time.Second, attemptTimeout)
-			writeJSON(w, http.StatusAccepted, map[string]interface{}{
-				"id":         submission.GenerationID,
-				"object":     "video.generation",
-				"created":    submission.CreatedAt.Unix(),
-				"model":      responseModelID,
-				"status":     "in_progress",
-				"poll_url":   videoGenerationPollURL(r.URL.Path, submission.GenerationID),
-				"request_id": submission.GenerationID,
-			})
 			return
 		}
 
-		lastFailure = failure
-		lastTokenID = usedTokenID
-		lastSession = session
-		lastAttempt = attempt
-
+		lastFailure, lastTokenID, lastSession = failure, usedTokenID, session
 		if failure.Insufficient || (retryPolicy.retryAction(failure, generationRetryPhaseSubmit) == generationRetryActionNextToken && attempt < retryPolicy.MaxAttempts) {
 			triedTokenIDs[usedTokenID] = true
 			if s.TokenMgr != nil && usedTokenID != "" {
@@ -524,9 +561,10 @@ func (s *Server) HandleVideoGeneration(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			releaseTokenPreparation()
-			delay := retryPolicy.backoffDelay(attempt)
-			if !failure.Insufficient && delay > 0 {
-				time.Sleep(delay)
+			if !failure.Insufficient {
+				if delay := retryPolicy.backoffDelay(attempt); delay > 0 {
+					time.Sleep(delay)
+				}
 			}
 			continue
 		}
@@ -541,8 +579,7 @@ func (s *Server) HandleVideoGeneration(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		releaseTokenPreparation()
-		s.logVideoRequestFailure("openai.video.generate", prompt, modelID, duration, width, height, usedTokenID, session, attempt, failure.StatusCode, failure.Message)
-		writeJSON(w, failure.StatusCode, errorResp(failure.Message, failure.ErrorType))
+		s.markVideoGenerationFailure(publicGenerationID, failure.StatusCode, failure.Message, createdAt)
 		return
 	}
 
@@ -556,12 +593,24 @@ func (s *Server) HandleVideoGeneration(w http.ResponseWriter, r *http.Request) {
 				s.TokenMgr.ReportFail(lastTokenID)
 			}
 		}
-		s.logVideoRequestFailure("openai.video.generate", prompt, modelID, duration, width, height, lastTokenID, lastSession, lastAttempt, lastFailure.StatusCode, lastFailure.Message)
-		writeJSON(w, lastFailure.StatusCode, errorResp(lastFailure.Message, lastFailure.ErrorType))
+		s.markVideoGenerationFailure(publicGenerationID, lastFailure.StatusCode, lastFailure.Message, createdAt)
 		return
 	}
+	s.markVideoGenerationFailure(publicGenerationID, http.StatusServiceUnavailable, "No tokens available", createdAt)
+}
 
-	writeJSON(w, 503, errorResp("No tokens available", "server_error"))
+func (s *Server) markVideoGenerationFailure(publicGenerationID string, statusCode int, message string, createdAt time.Time) {
+	if statusCode <= 0 {
+		statusCode = http.StatusBadGateway
+	}
+	if strings.TrimSpace(message) == "" {
+		message = "generation failed"
+	}
+	if s.ReqLog != nil {
+		s.ReqLog.UpdateByGenerationID(publicGenerationID, "FAILED", statusCode, "", "", message)
+		s.ReqLog.UpdateDuration(publicGenerationID, time.Since(createdAt).Seconds())
+	}
+	log.Printf("[generation] async job %s failed (%d): %s", publicGenerationID, statusCode, message)
 }
 
 // HandleVideoGenerationStatus handles GET /v1/video/generations/{id}.
@@ -612,10 +661,14 @@ func (s *Server) HandleVideoGenerationStatus(w http.ResponseWriter, r *http.Requ
 		}
 	case "FAILED":
 		status = "failed"
+		errorType := "server_error"
+		if entry.StatusCode >= http.StatusBadRequest && entry.StatusCode < http.StatusInternalServerError {
+			errorType = "invalid_request_error"
+		}
 		response["status"] = status
 		response["error"] = map[string]interface{}{
 			"message": strings.TrimSpace(entry.ErrorMessage),
-			"type":    "server_error",
+			"type":    errorType,
 		}
 	default:
 		response["status"] = status
@@ -852,6 +905,7 @@ func isRetryableGuidancePreparationError(err error) bool {
 	// Source URL and validation errors are deterministic; switching tokens will
 	// not fix a bad image URL, unsupported content type, or malformed payload.
 	nonRetryableMarkers := []string{
+		"reference video dimensions",
 		"image url returned 400",
 		"image url returned 401",
 		"image url returned 403",
@@ -945,6 +999,8 @@ func (s *Server) reloadRuntimeClients() {
 
 func normalizeVideoModelID(modelID string) (string, bool) {
 	switch strings.TrimSpace(modelID) {
+	case "video-2.5", "seedance-2.5":
+		return "seedance-2.5", true
 	case "video-2.0", "seedance-2.0":
 		return "seedance-2.0", true
 	case "video-2.0-fast", "seedance-2.0-fast":
@@ -970,6 +1026,8 @@ func normalizeVideoModelID(modelID string) (string, bool) {
 
 func publicVideoModelID(modelID string) string {
 	switch strings.TrimSpace(modelID) {
+	case "seedance-2.5", "video-2.5":
+		return "video-2.5"
 	case "seedance-2.0", "video-2.0":
 		return "video-2.0"
 	case "seedance-2.0-fast", "video-2.0-fast":
@@ -1029,7 +1087,16 @@ func isMinimaxH3ModelID(modelID string) bool {
 
 func isSeedanceModelID(modelID string) bool {
 	switch strings.TrimSpace(modelID) {
-	case "seedance-2.0", "video-2.0", "seedance-2.0-fast", "video-2.0-fast", "seedance-2.0-mini", "video-2.0-mini", "seedance-2.0-480p", "video-2.0-480p", "seedance-2.0-fast-480p", "video-2.0-fast-480p", "seedance-2.0-mini-480p", "video-2.0-mini-480p":
+	case "seedance-2.5", "video-2.5", "seedance-2.0", "video-2.0", "seedance-2.0-fast", "video-2.0-fast", "seedance-2.0-mini", "video-2.0-mini", "seedance-2.0-480p", "video-2.0-480p", "seedance-2.0-fast-480p", "video-2.0-fast-480p", "seedance-2.0-mini-480p", "video-2.0-mini-480p":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSeedance25ModelID(modelID string) bool {
+	switch strings.TrimSpace(modelID) {
+	case "seedance-2.5", "video-2.5":
 		return true
 	default:
 		return false
@@ -1046,6 +1113,9 @@ func isSeedance480pModelID(modelID string) bool {
 }
 
 func defaultVideoDuration(modelID string) int {
+	if isSeedance25ModelID(modelID) {
+		return 4
+	}
 	if isSora2ModelID(modelID) {
 		return defaultSora2VideoDuration
 	}
@@ -1059,6 +1129,9 @@ func defaultVideoDuration(modelID string) int {
 }
 
 func defaultVideoSize(modelID string) (int, int) {
+	if isSeedance25ModelID(modelID) {
+		return 1280, 720
+	}
 	if isSora2ModelID(modelID) {
 		return 720, 1280
 	}
@@ -1078,6 +1151,9 @@ func videoSizeForAspectRatio(modelID string, aspectRatio string) (int, int, bool
 	aspectRatio = strings.TrimSpace(aspectRatio)
 	switch aspectRatio {
 	case "16:9":
+		if isSeedance25ModelID(modelID) {
+			return 1280, 720, true
+		}
 		if isMinimaxH3ModelID(modelID) {
 			return 2560, 1440, true
 		}
@@ -1089,6 +1165,9 @@ func videoSizeForAspectRatio(modelID string, aspectRatio string) (int, int, bool
 		}
 		return 1280, 720, true
 	case "9:16":
+		if isSeedance25ModelID(modelID) {
+			return 0, 0, false
+		}
 		if isMinimaxH3ModelID(modelID) {
 			return 1440, 2560, true
 		}
@@ -1100,6 +1179,9 @@ func videoSizeForAspectRatio(modelID string, aspectRatio string) (int, int, bool
 		}
 		return 720, 1280, true
 	case "1:1":
+		if isSeedance25ModelID(modelID) {
+			return 0, 0, false
+		}
 		if isSora2ModelID(modelID) {
 			return 0, 0, false
 		}
@@ -1167,6 +1249,10 @@ func isAllowedSora2Size(width int, height int) bool {
 
 func isAllowedSeedance480pSize(width int, height int) bool {
 	return (width == 496 && height == 864) || (width == 864 && height == 496) || (width == 640 && height == 640)
+}
+
+func isAllowedSeedance25Size(width int, height int) bool {
+	return width == 1280 && height == 720
 }
 
 func isAllowedMinimaxH3Duration(duration int) bool {
@@ -1322,8 +1408,8 @@ func validateMinimaxH3GuidanceInput(data map[string]interface{}) error {
 	if hasVideoReferenceInput(data) {
 		return fmt.Errorf("minimax-h3 does not support video_reference")
 	}
-	if imageCount > 5 {
-		return fmt.Errorf("minimax-h3 supports at most 5 image references")
+	if imageCount > maxPublicImageReferences {
+		return fmt.Errorf("minimax-h3 supports at most %d image references", maxPublicImageReferences)
 	}
 	if startCount > 1 || endCount > 1 {
 		return fmt.Errorf("minimax-h3 supports at most one start frame and one end frame")
@@ -1342,6 +1428,9 @@ func hasUnsupportedKlingO3GuidanceInput(data map[string]interface{}) bool {
 }
 
 func leonardoVideoResolutionMode(modelID string, width int, height int) string {
+	if isSeedance25ModelID(modelID) {
+		return ""
+	}
 	if isMinimaxH3ModelID(modelID) {
 		return ""
 	}
@@ -1354,7 +1443,7 @@ func leonardoVideoResolutionMode(modelID string, width int, height int) string {
 	return "RESOLUTION_720"
 }
 
-func (s *Server) submitLeonardoVideoGeneration(session *leonardo.TokenSession, usedTokenID string, tokenAttempt int, prompt string, modelID string, duration int, width int, height int, imageRefs []leonardo.ImageRef, startFrames []leonardo.FrameRef, endFrames []leonardo.FrameRef, videoRefs []leonardo.VideoRef, audioRefs []leonardo.AudioRef) (*videoGenerationSubmission, *videoGenerationAttemptFailure) {
+func (s *Server) submitLeonardoVideoGeneration(session *leonardo.TokenSession, usedTokenID string, tokenAttempt int, prompt string, modelID string, duration int, width int, height int, motionHasAudio bool, imageRefs []leonardo.ImageRef, startFrames []leonardo.FrameRef, endFrames []leonardo.FrameRef, videoRefs []leonardo.VideoRef, audioRefs []leonardo.AudioRef) (*videoGenerationSubmission, *videoGenerationAttemptFailure) {
 	if s.LeonardoClient == nil {
 		return nil, &videoGenerationAttemptFailure{
 			StatusCode:      http.StatusInternalServerError,
@@ -1373,7 +1462,7 @@ func (s *Server) submitLeonardoVideoGeneration(session *leonardo.TokenSession, u
 			Duration:       duration,
 			Width:          width,
 			Height:         height,
-			MotionHasAudio: true,
+			MotionHasAudio: motionHasAudio,
 			ImageRefs:      imageRefs,
 			StartFrame:     startFrames,
 			EndFrame:       endFrames,
@@ -1398,35 +1487,25 @@ func (s *Server) submitLeonardoVideoGeneration(session *leonardo.TokenSession, u
 	}
 	s.applyTokenCreditCost(usedTokenID, result.APICreditCost)
 
-	if s.ReqLog != nil {
-		accountName, accountEmail := s.resolveReqLogAccount(usedTokenID, session)
-		if tokenAttempt <= 0 {
-			tokenAttempt = 1
-		}
-		s.ReqLog.Add(reqlog.Entry{
-			Timestamp:            float64(startTime.Unix()),
-			StatusCode:           200,
-			TaskStatus:           "IN_PROGRESS",
-			Type:                 "video",
-			TokenID:              usedTokenID,
-			TokenAttempt:         tokenAttempt,
-			AccountName:          accountName,
-			AccountEmail:         accountEmail,
-			Model:                publicVideoModelID(modelID),
-			ModelParams:          videoModelParams(modelID, width, height, duration),
-			Prompt:               prompt,
-			GenerationID:         result.GenerationID,
-			UpstreamGenerationID: result.GenerationID,
-			CreditCost:           result.APICreditCost,
-			Operation:            "leonardo.generate",
-		})
-	}
-
 	return &videoGenerationSubmission{
-		GenerationID: result.GenerationID,
-		CreatedAt:    startTime,
-		Request:      genReq,
+		UpstreamGenerationID: result.GenerationID,
+		CreatedAt:            startTime,
+		Request:              genReq,
+		CreditCost:           result.APICreditCost,
 	}, nil
+}
+
+func motionHasAudioFromRequest(data map[string]interface{}) bool {
+	if data == nil {
+		return true
+	}
+	if disabled, ok := data["disable_audio"].(bool); ok {
+		return !disabled
+	}
+	if enabled, ok := data["motion_has_audio"].(bool); ok {
+		return enabled
+	}
+	return true
 }
 
 func (s *Server) trackLeonardoVideoGeneration(ctx *asyncVideoGenerationContext, pollInterval time.Duration, attemptTimeout time.Duration) {

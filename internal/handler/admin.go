@@ -243,11 +243,7 @@ func (s *Server) HandleTokenAdd(w http.ResponseWriter, r *http.Request) {
 			if err == nil && session != nil {
 				tokenID, _ := info["id"].(string)
 				if tokenID != "" {
-					s.TokenMgr.UpdateAccountInfo(tokenID, session.HasuraUserID, session.Email)
-					if credits != nil {
-						s.TokenMgr.UpdateCredits(tokenID, float64(credits.TotalTokens), float64(credits.SubscriptionTokens+credits.PaidTokens+credits.RolloverTokens))
-						s.TokenMgr.UpdateExpiry(tokenID, float64(session.JWTExpiry.Unix()))
-					}
+					_ = s.persistLeonardoRefreshSuccess(tokenID, session, credits)
 				}
 				leoInfo = map[string]interface{}{
 					"status":     "validated",
@@ -442,17 +438,8 @@ func (s *Server) validateLeonardoTokenAsync(tokenID, rawToken string) {
 		return
 	}
 
-	if err := s.TokenMgr.UpdateAccountInfo(tokenID, session.HasuraUserID, session.Email); err != nil {
-		log.Printf("[token] failed to update Leonardo account info for %s: %v", tokenID, err)
-	}
-	if credits != nil {
-		totalCredits := float64(credits.SubscriptionTokens + credits.PaidTokens + credits.RolloverTokens)
-		if err := s.TokenMgr.UpdateCredits(tokenID, float64(credits.TotalTokens), totalCredits); err != nil {
-			log.Printf("[token] failed to update Leonardo credits for %s: %v", tokenID, err)
-		}
-	}
-	if err := s.TokenMgr.UpdateExpiry(tokenID, float64(session.JWTExpiry.Unix())); err != nil {
-		log.Printf("[token] failed to update Leonardo expiry for %s: %v", tokenID, err)
+	if err := s.persistLeonardoRefreshSuccess(tokenID, session, credits); err != nil {
+		log.Printf("[token] failed to persist Leonardo refresh for %s: %v", tokenID, err)
 	}
 
 	log.Printf("[token] leonardo validation completed for %s (%s)", tokenID, session.Email)
@@ -921,13 +908,12 @@ func (s *Server) HandleCheckInvalidTokensBatch(w http.ResponseWriter, r *http.Re
 			items = append(items, item)
 			continue
 		}
-		s.restoreTokenAfterSuccessfulRefresh(id)
+		if err := s.persistLeonardoRefreshSuccess(id, session, credits); err != nil {
+			log.Printf("[token] failed to persist Leonardo refresh for %s: %v", id, err)
+		}
 		if credits != nil {
-			s.TokenMgr.UpdateCredits(id, float64(credits.TotalTokens), float64(credits.SubscriptionTokens+credits.PaidTokens+credits.RolloverTokens))
 			item["credits"] = credits.TotalTokens
 		}
-		s.TokenMgr.UpdateExpiry(id, float64(session.JWTExpiry.Unix()))
-		s.TokenMgr.UpdateAccountInfo(id, session.HasuraUserID, session.Email)
 		valid++
 		item["status"] = "valid"
 		item["email"] = session.Email
@@ -1253,12 +1239,9 @@ func (s *Server) HandleTokenRefresh(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Update token info in the pool
-		s.restoreTokenAfterSuccessfulRefresh(tokenID)
-		if credits != nil {
-			s.TokenMgr.UpdateCredits(tokenID, float64(credits.TotalTokens), float64(credits.SubscriptionTokens+credits.PaidTokens+credits.RolloverTokens))
+		if err := s.persistLeonardoRefreshSuccess(tokenID, session, credits); err != nil {
+			log.Printf("[token] failed to persist Leonardo refresh for %s: %v", tokenID, err)
 		}
-		s.TokenMgr.UpdateExpiry(tokenID, float64(session.JWTExpiry.Unix()))
-		s.TokenMgr.UpdateAccountInfo(tokenID, session.HasuraUserID, session.Email)
 
 		result := map[string]interface{}{
 			"ok":            true,
@@ -1753,9 +1736,7 @@ func (s *Server) runCookieImportJob(jobID string, inputs []cookieImportInput) {
 						}
 						s.cookieImportMu.Unlock()
 					} else {
-						s.restoreTokenAfterSuccessfulRefresh(tokenID)
-						_ = s.TokenMgr.UpdateExpiry(tokenID, float64(session.JWTExpiry.Unix()))
-						_ = s.TokenMgr.UpdateAccountInfo(tokenID, session.HasuraUserID, session.Email)
+						_ = s.persistLeonardoRefreshSuccess(tokenID, session, credits)
 						tokenAccountEmail = strings.TrimSpace(session.Email)
 						if tokenAccountName == "" {
 							tokenAccountName = tokenAccountEmail
@@ -1986,13 +1967,10 @@ func (s *Server) runTokenRefreshBatchJob(jobID string, ids []string) {
 					}
 					s.tokenRefreshJobMu.Unlock()
 				} else {
-					s.restoreTokenAfterSuccessfulRefresh(id)
+					_ = s.persistLeonardoRefreshSuccess(id, session, credits)
 					if credits != nil {
-						_ = s.TokenMgr.UpdateCredits(id, float64(credits.TotalTokens), float64(credits.SubscriptionTokens+credits.PaidTokens+credits.RolloverTokens))
 						detail = fmt.Sprintf("刷新成功，剩余积分 %d", credits.TotalTokens)
 					}
-					_ = s.TokenMgr.UpdateExpiry(id, float64(session.JWTExpiry.Unix()))
-					_ = s.TokenMgr.UpdateAccountInfo(id, session.HasuraUserID, session.Email)
 					s.tokenRefreshJobMu.Lock()
 					job := s.tokenRefreshJobs[jobID]
 					if job != nil {
@@ -2107,6 +2085,7 @@ func (s *Server) HandleLeonardoGenerate(w http.ResponseWriter, r *http.Request) 
 		Width         int    `json:"width"`
 		Height        int    `json:"height"`
 		Public        *bool  `json:"public,omitempty"` // default true
+		DisableAudio  bool   `json:"disable_audio,omitempty"`
 		ImageGuidance []struct {
 			ID       string `json:"id"`
 			URL      string `json:"url"`
@@ -2221,8 +2200,8 @@ func (s *Server) HandleLeonardoGenerate(w http.ResponseWriter, r *http.Request) 
 			writeJSON(w, 400, map[string]string{"detail": "minimax-h3 does not support video_reference"})
 			return
 		}
-		if len(body.ImageGuidance) > 5 {
-			writeJSON(w, 400, map[string]string{"detail": "minimax-h3 supports at most 5 image references"})
+		if len(body.ImageGuidance) > maxPublicImageReferences {
+			writeJSON(w, 400, map[string]string{"detail": fmt.Sprintf("minimax-h3 supports at most %d image references", maxPublicImageReferences)})
 			return
 		}
 		if len(body.StartFrame) > 1 || len(body.EndFrame) > 1 {
@@ -2290,21 +2269,37 @@ func (s *Server) HandleLeonardoGenerate(w http.ResponseWriter, r *http.Request) 
 
 	// Build image refs (multi-image reference)
 	var imageRefs []leonardo.ImageRef
-	for _, ig := range body.ImageGuidance {
-		refType := strings.TrimSpace(ig.Type)
-		if refType == "" || (strings.TrimSpace(ig.ID) == "" && strings.TrimSpace(ig.URL) != "") {
-			refType = "UPLOADED"
+	if len(body.ImageGuidance) > providerImageReferenceLimit {
+		sources := make([]imageReferenceSource, 0, len(body.ImageGuidance))
+		for _, ig := range body.ImageGuidance {
+			sources = append(sources, imageReferenceSource{
+				URL:      strings.TrimSpace(ig.URL),
+				Strength: strings.ToUpper(strings.TrimSpace(ig.Strength)),
+			})
 		}
-		imageID, err := s.resolveLeonardoImageID(session, ig.ID, ig.URL, uploadCache)
+		packedRefs, err := s.packImageReferenceSources(session, sources)
 		if err != nil {
-			writeJSON(w, 400, map[string]string{"detail": fmt.Sprintf("invalid image_guidance entry: %v", err)})
+			writeJSON(w, 400, map[string]string{"detail": fmt.Sprintf("invalid image_guidance: %v", err)})
 			return
 		}
-		imageRefs = append(imageRefs, leonardo.ImageRef{
-			ID:       imageID,
-			Type:     refType,
-			Strength: ig.Strength,
-		})
+		imageRefs = packedRefs
+	} else {
+		for _, ig := range body.ImageGuidance {
+			refType := strings.TrimSpace(ig.Type)
+			if refType == "" || (strings.TrimSpace(ig.ID) == "" && strings.TrimSpace(ig.URL) != "") {
+				refType = "UPLOADED"
+			}
+			imageID, err := s.resolveLeonardoImageID(session, ig.ID, ig.URL, uploadCache)
+			if err != nil {
+				writeJSON(w, 400, map[string]string{"detail": fmt.Sprintf("invalid image_guidance entry: %v", err)})
+				return
+			}
+			imageRefs = append(imageRefs, leonardo.ImageRef{
+				ID:       imageID,
+				Type:     refType,
+				Strength: ig.Strength,
+			})
+		}
 	}
 
 	// Build start/end frame refs
@@ -2388,7 +2383,7 @@ func (s *Server) HandleLeonardoGenerate(w http.ResponseWriter, r *http.Request) 
 			Duration:       body.Duration,
 			Width:          body.Width,
 			Height:         body.Height,
-			MotionHasAudio: true,
+			MotionHasAudio: !body.DisableAudio,
 			ImageRefs:      imageRefs,
 			StartFrame:     startFrames,
 			EndFrame:       endFrames,
@@ -3033,12 +3028,31 @@ func (s *Server) uploadLeonardoVideoBytes(session *leonardo.TokenSession, videoD
 	if err != nil {
 		return "", fmt.Errorf("wait for staged video asset failed: %w", err)
 	}
+	if err := validateLeonardoReferenceVideoDimensions(uploadedMedia); err != nil {
+		return "", err
+	}
 	videoDuration := 0.0
 	if uploadedMedia.Duration != nil {
 		videoDuration = *uploadedMedia.Duration
 	}
 	log.Printf("[Leonardo] Video upload ready: uploadID=%s status=%s width=%v height=%v duration=%.3fs url=%s", initResult.UploadID, uploadedMedia.Status, uploadedMedia.Width, uploadedMedia.Height, videoDuration, uploadedMedia.URL)
 	return initResult.UploadID, nil
+}
+
+const (
+	minLeonardoReferenceVideoDimension = 720
+	maxLeonardoReferenceVideoDimension = 2160
+)
+
+func validateLeonardoReferenceVideoDimensions(media *leonardo.UploadedMedia) error {
+	if media == nil || media.Width == nil || media.Height == nil {
+		return fmt.Errorf("reference video dimensions are unavailable; Leonardo requires width and height metadata")
+	}
+	width, height := *media.Width, *media.Height
+	if width < minLeonardoReferenceVideoDimension || height < minLeonardoReferenceVideoDimension || width > maxLeonardoReferenceVideoDimension || height > maxLeonardoReferenceVideoDimension {
+		return fmt.Errorf("reference video dimensions %dx%d are unsupported; Leonardo requires each dimension between %d and %d pixels", width, height, minLeonardoReferenceVideoDimension, maxLeonardoReferenceVideoDimension)
+	}
+	return nil
 }
 
 func (s *Server) uploadLeonardoAudioBytes(session *leonardo.TokenSession, audioData []byte, ext, contentType, originalFilename string) (string, float64, error) {
@@ -3962,6 +3976,30 @@ func (s *Server) generationTokenCandidates(candidates []map[string]interface{}, 
 	return out
 }
 
+func (s *Server) logEmptyGenerationTokenSelection(raw []map[string]interface{}, filtered []map[string]interface{}, excluded map[string]bool, modelID string, videoReferenceMode bool) {
+	if s == nil {
+		return
+	}
+	reasons := map[string]int{}
+	for _, info := range raw {
+		id := strings.TrimSpace(toString(info["id"]))
+		switch {
+		case id == "":
+			reasons["missing_id"]++
+		case excluded != nil && excluded[id]:
+			reasons["already_tried"]++
+		case !s.tokenCanAcceptSubmission(id):
+			reasons["running_or_preparing"]++
+		case !s.tokenCanRunModelByCredits(info, modelID, videoReferenceMode):
+			reasons["insufficient_or_unknown_credits"]++
+		case generationJWTWindowPriority(info) > 1:
+			reasons["jwt_expiring"]++
+		}
+	}
+	required, known := requiredCreditsForVideoRequest(modelID, videoReferenceMode)
+	log.Printf("[token] no generation token selected: model=%s required_credits=%.0f credits_known=%t raw_candidates=%d eligible=%d rejected=%v", strings.TrimSpace(modelID), required, known, len(raw), len(filtered), reasons)
+}
+
 func (s *Server) getLeonardoSessionForModelExcludingWithPreparationLease(tokenID string, excluded map[string]bool, modelID string, videoReferenceMode bool) (*leonardo.TokenSession, string, func()) {
 	release := func() {}
 	if tokenID != "" {
@@ -3987,7 +4025,11 @@ func (s *Server) getLeonardoSessionForModelExcludingWithPreparationLease(tokenID
 		strategy = strings.TrimSpace(s.Config.GetString("token_rotation_strategy", "round_robin"))
 	}
 
-	candidates := s.generationTokenCandidates(s.TokenMgr.AvailableTokensForPlatform("leonardo", strategy), excluded, modelID, videoReferenceMode, strategy)
+	rawCandidates := s.TokenMgr.AvailableTokensForPlatform("leonardo", strategy)
+	candidates := s.generationTokenCandidates(rawCandidates, excluded, modelID, videoReferenceMode, strategy)
+	if len(candidates) == 0 {
+		s.logEmptyGenerationTokenSelection(rawCandidates, candidates, excluded, modelID, videoReferenceMode)
+	}
 	for _, info := range candidates {
 		foundID := strings.TrimSpace(toString(info["id"]))
 		if foundID == "" {
@@ -4038,7 +4080,11 @@ func (s *Server) getLeonardoSessionForModelExcluding(tokenID string, excluded ma
 		strategy = strings.TrimSpace(s.Config.GetString("token_rotation_strategy", "round_robin"))
 	}
 
-	candidates := s.generationTokenCandidates(s.TokenMgr.AvailableTokensForPlatform("leonardo", strategy), excluded, modelID, false, strategy)
+	rawCandidates := s.TokenMgr.AvailableTokensForPlatform("leonardo", strategy)
+	candidates := s.generationTokenCandidates(rawCandidates, excluded, modelID, false, strategy)
+	if len(candidates) == 0 {
+		s.logEmptyGenerationTokenSelection(rawCandidates, candidates, excluded, modelID, false)
+	}
 	for _, info := range candidates {
 		foundID := strings.TrimSpace(toString(info["id"]))
 		if foundID == "" {
@@ -4111,7 +4157,11 @@ func (s *Server) getLeonardoSessionForModel(tokenID string, modelID string, vide
 		strategy = strings.TrimSpace(s.Config.GetString("token_rotation_strategy", "round_robin"))
 	}
 
-	candidates := s.generationTokenCandidates(s.TokenMgr.AvailableTokensForPlatform("leonardo", strategy), nil, modelID, videoReferenceMode, strategy)
+	rawCandidates := s.TokenMgr.AvailableTokensForPlatform("leonardo", strategy)
+	candidates := s.generationTokenCandidates(rawCandidates, nil, modelID, videoReferenceMode, strategy)
+	if len(candidates) == 0 {
+		s.logEmptyGenerationTokenSelection(rawCandidates, candidates, nil, modelID, videoReferenceMode)
+	}
 	for _, info := range candidates {
 		foundID := strings.TrimSpace(toString(info["id"]))
 		if foundID == "" {
@@ -4148,6 +4198,8 @@ func requiredCreditsForVideoRequest(modelID string, videoReferenceMode bool) (fl
 	switch canonicalModelID {
 	case "sora-2":
 		return sora2RequiredCredits, true
+	case "seedance-2.5":
+		return seedance25RequiredCredits, true
 	case "seedance-2.0":
 		return video2RequiredCredits, true
 	case "seedance-2.0-480p":

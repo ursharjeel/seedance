@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -18,6 +20,20 @@ type SQLiteStore struct {
 	DBPath string
 }
 
+const sqliteBusyRetryCount = 6
+
+func sqliteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "sqlite_busy") || strings.Contains(msg, "busy")
+}
+
+func sqliteRetryDelay(attempt int) time.Duration {
+	return time.Duration(100*(1<<attempt)) * time.Millisecond
+}
+
 // NewSQLiteStore opens (or creates) a SQLite database.
 func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	dir := filepath.Dir(dbPath)
@@ -27,11 +43,16 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	// DELETE journal mode is slower than WAL, but it is far more predictable on
 	// Docker bind mounts and Windows-hosted volumes where WAL sidecar files can
 	// cause token imports to appear flaky.
-	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=DELETE&_busy_timeout=5000")
+	db, err := sql.Open("sqlite", dbPath+"?_journal_mode=DELETE&_busy_timeout=15000")
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
 	s := &SQLiteStore{db: db, DBPath: dbPath}
+	// The store already serializes operations. Limiting the driver to one
+	// connection prevents sql.DB from creating a second connection that can
+	// contend with a writer between two serialized calls.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, err
@@ -73,25 +94,38 @@ func (s *SQLiteStore) LoadTokens() ([]map[string]interface{}, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.Query("SELECT data FROM tokens ORDER BY id")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var tokens []map[string]interface{}
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			continue
+	for attempt := 0; attempt < sqliteBusyRetryCount; attempt++ {
+		rows, err := s.db.Query("SELECT data FROM tokens ORDER BY id")
+		if err != nil {
+			if sqliteBusy(err) && attempt+1 < sqliteBusyRetryCount {
+				time.Sleep(sqliteRetryDelay(attempt))
+				continue
+			}
+			return nil, err
 		}
-		var item map[string]interface{}
-		if err := json.Unmarshal([]byte(raw), &item); err != nil {
-			continue
+		var tokens []map[string]interface{}
+		for rows.Next() {
+			var raw string
+			if err := rows.Scan(&raw); err != nil {
+				continue
+			}
+			var item map[string]interface{}
+			if err := json.Unmarshal([]byte(raw), &item); err != nil {
+				continue
+			}
+			tokens = append(tokens, item)
 		}
-		tokens = append(tokens, item)
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			if sqliteBusy(err) && attempt+1 < sqliteBusyRetryCount {
+				time.Sleep(sqliteRetryDelay(attempt))
+				continue
+			}
+			return nil, err
+		}
+		return tokens, nil
 	}
-	return tokens, nil
+	return nil, fmt.Errorf("sqlite token read failed after retries")
 }
 
 // ReplaceTokens atomically replaces all tokens.
@@ -99,35 +133,65 @@ func (s *SQLiteStore) ReplaceTokens(tokens []map[string]interface{}) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec("DELETE FROM tokens"); err != nil {
-		return err
-	}
-	stmt, err := tx.Prepare("INSERT OR REPLACE INTO tokens (id, data) VALUES (?, ?)")
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for _, token := range tokens {
-		id, _ := token["id"].(string)
-		if id == "" {
-			continue
-		}
-		raw, err := json.Marshal(token)
+	for attempt := 0; attempt < sqliteBusyRetryCount; attempt++ {
+		tx, err := s.db.Begin()
 		if err != nil {
-			continue
+			if sqliteBusy(err) && attempt+1 < sqliteBusyRetryCount {
+				time.Sleep(sqliteRetryDelay(attempt))
+				continue
+			}
+			return err
 		}
-		if _, err := stmt.Exec(id, string(raw)); err != nil {
-			continue
+		failed := func(err error) error {
+			_ = tx.Rollback()
+			return err
 		}
+		if _, err := tx.Exec("DELETE FROM tokens"); err != nil {
+			if sqliteBusy(err) && attempt+1 < sqliteBusyRetryCount {
+				_ = tx.Rollback()
+				time.Sleep(sqliteRetryDelay(attempt))
+				continue
+			}
+			return failed(err)
+		}
+		stmt, err := tx.Prepare("INSERT OR REPLACE INTO tokens (id, data) VALUES (?, ?)")
+		if err != nil {
+			return failed(err)
+		}
+		writeErr := error(nil)
+		for _, token := range tokens {
+			id, _ := token["id"].(string)
+			if id == "" {
+				continue
+			}
+			raw, marshalErr := json.Marshal(token)
+			if marshalErr != nil {
+				continue
+			}
+			if _, execErr := stmt.Exec(id, string(raw)); execErr != nil {
+				writeErr = execErr
+				break
+			}
+		}
+		_ = stmt.Close()
+		if writeErr != nil {
+			if sqliteBusy(writeErr) && attempt+1 < sqliteBusyRetryCount {
+				_ = tx.Rollback()
+				time.Sleep(sqliteRetryDelay(attempt))
+				continue
+			}
+			return failed(writeErr)
+		}
+		if err := tx.Commit(); err != nil {
+			if sqliteBusy(err) && attempt+1 < sqliteBusyRetryCount {
+				time.Sleep(sqliteRetryDelay(attempt))
+				continue
+			}
+			return err
+		}
+		return nil
 	}
-	return tx.Commit()
+	return fmt.Errorf("sqlite token write failed after retries")
 }
 
 // --------------- Refresh Profiles ---------------

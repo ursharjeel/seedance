@@ -530,6 +530,81 @@ func TestGenerateBuildsSeedanceAudioReferencePayload(t *testing.T) {
 	}
 }
 
+func TestGenerateBuildsSeedance25PayloadAndParsesCost(t *testing.T) {
+	var requestBody string
+	client := NewClient("")
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("read request body: %v", err)
+			}
+			requestBody = string(body)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"data":{"generate":{"apiCreditCost":null,"generationId":"gen-seedance-25","cost":{"amount":"1168","unit":"CREDITS"}}}}`)),
+			}, nil
+		}),
+	}
+	session := &TokenSession{JWT: "jwt", JWTExpiry: time.Now().Add(time.Hour)}
+
+	result, err := client.Generate(session, &GenerateRequest{
+		Model:  "video-2.5",
+		Public: true,
+		Params: GenerateParams{
+			Prompt:         "cat runng in ther park",
+			Duration:       4,
+			Quantity:       1,
+			Width:          1280,
+			Height:         720,
+			MotionHasAudio: true,
+			Seed:           -1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if result.GenerationID != "gen-seedance-25" || result.APICreditCost != 1168 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if result.CostAmount != "1168" || result.CostUnit != "CREDITS" {
+		t.Fatalf("unexpected cost: amount=%q unit=%q", result.CostAmount, result.CostUnit)
+	}
+
+	payload := mustJSONMap(t, requestBody)
+	if !strings.Contains(payload["query"].(string), "cost {") {
+		t.Fatalf("Seedance 2.5 query did not request cost: %s", payload["query"])
+	}
+	request := payload["variables"].(map[string]interface{})["request"].(map[string]interface{})
+	if request["model"] != "bytedance/seedance-2.5" {
+		t.Fatalf("model = %v, want bytedance/seedance-2.5", request["model"])
+	}
+	params := request["parameters"].(map[string]interface{})
+	if params["width"] != float64(1280) || params["height"] != float64(720) || params["duration"] != float64(4) || params["motion_has_audio"] != true || params["seed"] != float64(-1) {
+		t.Fatalf("unexpected Seedance 2.5 scalar params: %v", params)
+	}
+	if _, ok := params["mode"]; ok {
+		t.Fatalf("mode should be omitted for Seedance 2.5, got %v", params["mode"])
+	}
+	if _, ok := params["prompt_enhance"]; ok {
+		t.Fatalf("prompt_enhance should be omitted for Seedance 2.5, got %v", params["prompt_enhance"])
+	}
+}
+
+func TestGenerateRejectsUnverifiedSeedance25Profile(t *testing.T) {
+	client := NewClient("")
+	session := &TokenSession{JWT: "jwt", JWTExpiry: time.Now().Add(time.Hour)}
+	for _, params := range []GenerateParams{
+		{Prompt: "test", Duration: 5, Width: 1280, Height: 720},
+		{Prompt: "test", Duration: 4, Width: 720, Height: 1280},
+	} {
+		if _, err := client.Generate(session, &GenerateRequest{Model: "seedance-2.5", Params: params}); err == nil {
+			t.Fatalf("unverified Seedance 2.5 profile should be rejected: %+v", params)
+		}
+	}
+}
+
 func TestGenerateBuildsMinimaxH3Payloads(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -1206,6 +1281,62 @@ func TestGenerateBuildsKlingO3MultiImageAndVideoReferencePayload(t *testing.T) {
 	}
 	if video["duration"] != 4.017007 {
 		t.Fatalf("video duration = %v, want 4.017007", video["duration"])
+	}
+}
+
+func TestGenerateBuildsSeedanceMixedImageAndVideoReferencePayload(t *testing.T) {
+	var requestBody string
+	client := NewClient("")
+	client.httpClient = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			body, err := io.ReadAll(req.Body)
+			if err != nil {
+				t.Fatalf("read request body: %v", err)
+			}
+			requestBody = string(body)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"data":{"generate":{"apiCreditCost":10,"generationId":"gen-seedance-image-video"}}}`)),
+			}, nil
+		}),
+	}
+	session := &TokenSession{JWT: "jwt", JWTExpiry: time.Now().Add(time.Hour)}
+
+	_, err := client.Generate(session, &GenerateRequest{
+		Model:  "seedance-2.0-fast",
+		Public: true,
+		Params: GenerateParams{
+			Prompt:         "mixed references",
+			Mode:           "RESOLUTION_720",
+			Duration:       15,
+			Quantity:       1,
+			MotionHasAudio: false,
+			Width:          1280,
+			Height:         720,
+			ImageRefs:      []ImageRef{{ID: "image", Type: "UPLOADED", Strength: "MID"}},
+			VideoRefs:      []VideoRef{{ID: "video", Type: "UPLOADED", Duration: 5}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+
+	payload := mustJSONMap(t, requestBody)
+	request := payload["variables"].(map[string]interface{})["request"].(map[string]interface{})
+	if request["model"] != "seedance-2.0-fast" {
+		t.Fatalf("model = %v, want seedance-2.0-fast", request["model"])
+	}
+	params := request["parameters"].(map[string]interface{})
+	if params["motion_has_audio"] != false {
+		t.Fatalf("motion_has_audio = %v, want false", params["motion_has_audio"])
+	}
+	guidances := params["guidances"].(map[string]interface{})
+	if len(guidances["image_reference"].([]interface{})) != 1 {
+		t.Fatalf("image_reference = %v, want one entry", guidances["image_reference"])
+	}
+	if len(guidances["video_reference_base"].([]interface{})) != 1 {
+		t.Fatalf("video_reference_base = %v, want one entry", guidances["video_reference_base"])
 	}
 }
 

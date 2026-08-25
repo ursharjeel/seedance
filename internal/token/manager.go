@@ -589,7 +589,7 @@ func (m *Manager) ReportModelSuccessWithAutoDisable(tokenIDOrValue, modelID stri
 	switch strings.TrimSpace(modelID) {
 	case "seedance-2.0-fast", "video-2.0-fast", "seedance-2.0-mini", "video-2.0-mini", "seedance-2.0-fast-480p", "video-2.0-fast-480p", "seedance-2.0-mini-480p", "video-2.0-mini-480p":
 		t.SeedanceFastCount++
-	case "seedance-2.0", "video-2.0", "seedance-2.0-480p", "video-2.0-480p":
+	case "seedance-2.5", "video-2.5", "seedance-2.0", "video-2.0", "seedance-2.0-480p", "video-2.0-480p":
 		t.SeedanceStdCount++
 	}
 
@@ -1107,6 +1107,71 @@ func (m *Manager) UpdateAccountInfo(tokenID, name, email string) error {
 			m.save()
 			return nil
 		}
+	}
+	return fmt.Errorf("token not found")
+}
+
+// UpdateLeonardoRefreshInfo persists the state returned by one Leonardo
+// validation/refresh in a single store write. Keeping these fields together
+// avoids three full token-pool rewrites racing with other refresh goroutines.
+func (m *Manager) UpdateLeonardoRefreshInfo(tokenID, name, email string, expiresAt float64, credits, maxCredits float64, hasCredits bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.tokens {
+		if t.ID != tokenID {
+			continue
+		}
+		if strings.TrimSpace(name) != "" {
+			t.AccountName = name
+		}
+		if strings.TrimSpace(email) != "" {
+			t.AccountEmail = email
+		}
+		if expiresAt > 0 {
+			t.ExpiresAt = expiresAt
+		}
+		if hasCredits {
+			t.Credits = credits
+			t.MaxCredits = maxCredits
+		}
+		m.save()
+		return nil
+	}
+	return fmt.Errorf("token not found")
+}
+
+// RecordLeonardoRefreshSuccess persists one successful Leonardo refresh and
+// restores normal scheduling state in the same write. Reserved tokens remain
+// reserved, and exhausted tokens remain exhausted until credit reconciliation.
+func (m *Manager) RecordLeonardoRefreshSuccess(tokenID, name, email string, expiresAt float64, credits, maxCredits float64, hasCredits bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.tokens {
+		if t.ID != tokenID {
+			continue
+		}
+		if t.Status != StatusReserved && t.Status != "exhausted" {
+			t.Status = "active"
+			t.AutoRefresh = true
+		}
+		if strings.TrimSpace(name) != "" {
+			t.AccountName = name
+		}
+		if strings.TrimSpace(email) != "" {
+			t.AccountEmail = email
+		}
+		if expiresAt > 0 {
+			t.ExpiresAt = expiresAt
+		}
+		if hasCredits {
+			t.Credits = credits
+			t.MaxCredits = maxCredits
+		}
+		clearRefreshFailureLocked(t)
+		t.Fails = 0
+		t.ErrorUntil = 0
+		m.save()
+		return nil
 	}
 	return fmt.Errorf("token not found")
 }

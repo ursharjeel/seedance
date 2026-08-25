@@ -84,6 +84,37 @@ func TestNormalizeVideoModelIDSupportsSeedanceMini(t *testing.T) {
 	}
 }
 
+func TestNormalizeVideoModelIDSupportsSeedance25(t *testing.T) {
+	for _, input := range []string{"seedance-2.5", "video-2.5"} {
+		modelID, ok := normalizeVideoModelID(input)
+		if !ok || modelID != "seedance-2.5" {
+			t.Fatalf("normalizeVideoModelID(%q) = %q, %v; want seedance-2.5, true", input, modelID, ok)
+		}
+	}
+	if got := publicVideoModelID("seedance-2.5"); got != "video-2.5" {
+		t.Fatalf("publicVideoModelID(seedance-2.5) = %q, want video-2.5", got)
+	}
+	if !isSeedanceModelID("seedance-2.5") || !isSeedance25ModelID("video-2.5") {
+		t.Fatal("Seedance 2.5 model detection failed")
+	}
+}
+
+func TestSeedance25DefaultsAndRestrictions(t *testing.T) {
+	if got := defaultVideoDuration("seedance-2.5"); got != 4 {
+		t.Fatalf("defaultVideoDuration(seedance-2.5) = %d, want 4", got)
+	}
+	width, height := defaultVideoSize("video-2.5")
+	if width != 1280 || height != 720 {
+		t.Fatalf("defaultVideoSize(video-2.5) = %dx%d, want 1280x720", width, height)
+	}
+	if !isAllowedSeedance25Size(1280, 720) || isAllowedSeedance25Size(720, 1280) {
+		t.Fatal("Seedance 2.5 size restrictions are incorrect")
+	}
+	if mode := leonardoVideoResolutionMode("seedance-2.5", 1280, 720); mode != "" {
+		t.Fatalf("leonardoVideoResolutionMode(seedance-2.5) = %q, want empty", mode)
+	}
+}
+
 func TestNormalizeVideoModelIDSupportsSeedance480pVariants(t *testing.T) {
 	tests := []struct {
 		input string
@@ -177,15 +208,19 @@ func TestMinimaxH3GuidanceRules(t *testing.T) {
 		t.Fatalf("explicit start/end frames should be allowed: %v", err)
 	}
 
-	sixImages := make([]interface{}, 6)
-	for i := range sixImages {
-		sixImages[i] = map[string]interface{}{"id": "image"}
+	imagesWithinCompatibilityLimit := make([]interface{}, 9)
+	for i := range imagesWithinCompatibilityLimit {
+		imagesWithinCompatibilityLimit[i] = map[string]interface{}{"id": "image"}
 	}
+	if err := validateMinimaxH3GuidanceInput(map[string]interface{}{"image_guidance": imagesWithinCompatibilityLimit}); err != nil {
+		t.Fatalf("nine images should pass request validation for compatibility packing: %v", err)
+	}
+	tenImages := append(append([]interface{}{}, imagesWithinCompatibilityLimit...), map[string]interface{}{"id": "image"})
 	tests := []struct {
 		name string
 		data map[string]interface{}
 	}{
-		{name: "six images", data: map[string]interface{}{"image_guidance": sixImages}},
+		{name: "ten images", data: map[string]interface{}{"image_guidance": tenImages}},
 		{name: "audio without image", data: map[string]interface{}{"audio_url": "https://example.com/reference.mp3"}},
 		{name: "audio with frames", data: map[string]interface{}{
 			"start_frame": []interface{}{map[string]interface{}{"id": "start"}},
@@ -425,6 +460,7 @@ func TestRetryableGuidancePreparationError(t *testing.T) {
 	}
 
 	nonRetryable := []string{
+		`invalid video_reference[0]: reference video dimensions 480x854 are unsupported`,
 		`invalid image_url: image url returned 400`,
 		`invalid image_urls[0]: image url returned 404`,
 		`invalid image_urls[0]: image url did not return an image content type`,
@@ -445,6 +481,7 @@ func TestRequiredCreditsForVideoModel(t *testing.T) {
 	}{
 		{modelID: "video-2.0", want: video2RequiredCredits, ok: true},
 		{modelID: "seedance-2.0", want: video2RequiredCredits, ok: true},
+		{modelID: "video-2.5", want: seedance25RequiredCredits, ok: true},
 		{modelID: "video-2.0-480p", want: video2Required480pCredits, ok: true},
 		{modelID: "seedance-2.0-480p", want: video2Required480pCredits, ok: true},
 		{modelID: "video-2.0-fast", want: video2FastRequiredCredits, ok: true},

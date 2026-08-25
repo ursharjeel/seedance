@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"fmt"
 	"log"
 	"strings"
 	"sync"
 	"time"
 
+	"leo2api/internal/provider/leonardo"
 	"leo2api/internal/token"
 )
 
@@ -205,21 +207,24 @@ func (s *Server) refreshLeonardoTokenByID(tokenID string) {
 		return
 	}
 
-	s.restoreTokenAfterSuccessfulRefresh(tokenID)
-	if err := s.TokenMgr.UpdateAccountInfo(tokenID, session.HasuraUserID, session.Email); err != nil {
-		log.Printf("[token] auto-refresh failed to update account info for %s: %v", tokenID, err)
-	}
-	if err := s.TokenMgr.UpdateExpiry(tokenID, float64(session.JWTExpiry.Unix())); err != nil {
-		log.Printf("[token] auto-refresh failed to update expiry for %s: %v", tokenID, err)
-	}
-	if credits != nil {
-		totalCredits := float64(credits.SubscriptionTokens + credits.PaidTokens + credits.RolloverTokens)
-		if err := s.TokenMgr.UpdateCredits(tokenID, float64(credits.TotalTokens), totalCredits); err != nil {
-			log.Printf("[token] auto-refresh failed to update credits for %s: %v", tokenID, err)
-		}
+	if err := s.persistLeonardoRefreshSuccess(tokenID, session, credits); err != nil {
+		log.Printf("[token] auto-refresh failed to persist refreshed state for %s: %v", tokenID, err)
 	}
 
 	log.Printf("[token] auto-refresh completed for %s (%s)", tokenID, session.Email)
+}
+
+func (s *Server) persistLeonardoRefreshSuccess(tokenID string, session *leonardo.TokenSession, credits *leonardo.Credits) error {
+	if s == nil || s.TokenMgr == nil || session == nil {
+		return fmt.Errorf("Leonardo refresh state is incomplete")
+	}
+	var availableCredits, totalCredits float64
+	hasCredits := credits != nil
+	if hasCredits {
+		availableCredits = float64(credits.TotalTokens)
+		totalCredits = float64(credits.SubscriptionTokens + credits.PaidTokens + credits.RolloverTokens)
+	}
+	return s.TokenMgr.RecordLeonardoRefreshSuccess(tokenID, session.HasuraUserID, session.Email, float64(session.JWTExpiry.Unix()), availableCredits, totalCredits, hasCredits)
 }
 
 func (s *Server) tokenAutoRefreshThreshold() time.Duration {
