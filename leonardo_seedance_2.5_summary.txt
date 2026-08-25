@@ -1,0 +1,412 @@
+Leonardo.ai Seedance 2.5 Network Capture Summary
+======================================================================
+
+Capture time: 2026-08-25T10:13:46.401837
+Total events: 2835
+
+API Endpoints Found:
+----------------------------------------------------------------------
+
+https://ad.doubleclick.net/activity;src=9812343;type=conve0;cat=canva008;ord=305359664;gtm=45g91e68l1v872399471z8812729902z9848341198za20kzb812729902zd812729902;dc_pre=1;u6=DZ;evnid=1787649237320_1787648624090120;rcb=3;dma=0;npa=0;gcd=13l3l3l3l1l1;uaa=x86;uab=64;uafvl=Chromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0;uamb=0;uam=;uap=Linux;uapv=;uaw=0;pscdl=noapi;tag_exp=115938466~115938469~117215454~118032361~118897920~118897930~119367802~119367810~120385423;_tu=BA;gap.sstd=5;gap.gtb=1;s3p=1;_is_sw=f15s0t22;~oref=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256
+  Methods: GET
+  Calls: 1
+
+https://ad.doubleclick.net/activity;src=9812343;type=paidm0;cat=canva00;ord=373180039;gtm=45g91e68l1v872399471z8812729902z9848341198za20kzb812729902zd812729902;dc_pre=1;evnid=1787649237320_178764862409099;rcb=3;dma=0;npa=0;gcd=13l3l3l3l1l1;uaa=x86;uab=64;uafvl=Chromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0;uamb=0;uam=;uap=Linux;uapv=;uaw=0;pscdl=noapi;tag_exp=115938466~115938469~118032361~118897920~118897930~119367802~119367810~120385423;_tu=BA;gap.sstd=5;gap.gtb=1;s3p=1;_is_sw=f15s0t18;~oref=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256
+  Methods: GET
+  Calls: 1
+
+https://ad.doubleclick.net/activity;src=9812343;type=paidm0;cat=canva0;ord=2026592803;gtm=45g91e68l1v872399471z8812729902z9848341198za20kzb812729902zd812729902;dc_pre=1;evnid=1787649237320_178764862409099;rcb=3;dma=0;npa=0;gcd=13l3l3l3l1l1;uaa=x86;uab=64;uafvl=Chromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0;uamb=0;uam=;uap=Linux;uapv=;uaw=0;pscdl=noapi;tag_exp=115938466~115938469~118032361~118897920~118897930~119367802~119367810~120385423;_tu=BA;gap.sstd=5;gap.gtb=1;s3p=1;_is_sw=f15s0t18;~oref=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256
+  Methods: GET
+  Calls: 1
+
+https://ad.doubleclick.net/activity;src=9812343;type=retar00;cat=flood0;qty=1;gtm=45g91e68l1v872399471z8812729902z9848341198za20kzb812729902zd812729902;dc_pre=1;u6=DZ;evnid=1787649237320_178764862409080;rcb=3;dma=0;npa=0;gcd=13l3l3l3l1l1;uaa=x86;uab=64;uafvl=Chromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0;uamb=0;uam=;uap=Linux;uapv=;uaw=0;pscdl=noapi;auiddc=342220896.1787648318;tag_exp=115938466~115938469~117215459~118032361~118897920~118897930~119367802~119367810~120385423;_tu=BA;gap.sstd=5;gap.gtb=1;s3p=1;_is_sw=f15s0t11;~oref=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256
+  Methods: GET
+  Calls: 1
+
+https://ad.doubleclick.net/activity;src=9812343;type=retar0;cat=flood0;ord=887220538;gtm=45g91e68l1v872399471z8812729902z9848341198za20kzb812729902zd812729902;dc_pre=1;u67=guest;u66=false;evnid=1787649237320_178764862409080;rcb=3;dma=0;npa=0;gcd=13l3l3l3l1l1;uaa=x86;uab=64;uafvl=Chromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0;uamb=0;uam=;uap=Linux;uapv=;uaw=0;pscdl=noapi;auiddc=342220896.1787648318;tag_exp=115938466~115938469~117215459~118032361~118897920~118897930~119367802~119367810~120385423;_tu=BA;gap.sstd=5;gap.gtb=1;s3p=1;_is_sw=f15s0t11;~oref=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256
+  Methods: GET
+  Calls: 1
+
+https://ad.doubleclick.net/activity;src=9812343;type=retar0;cat=flood1;ord=1;num=2103439502;gtm=45g91e68l1v872399471z8812729902z9848341198za20kzb812729902zd812729902;dc_pre=1;u67=guest;u66=false;evnid=1787649237320_178764862409080;rcb=3;dma=0;npa=0;gcd=13l3l3l3l1l1;uaa=x86;uab=64;uafvl=Chromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0;uamb=0;uam=;uap=Linux;uapv=;uaw=0;pscdl=noapi;auiddc=342220896.1787648318;em=tv.1;tag_exp=115938466~115938469~117215459~118032361~118897920~118897930~119367802~119367810~120385423;_tu=BA;gap.sstd=5;gap.gtb=1;s3p=1;_is_sw=f15s0t11;~oref=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256
+  Methods: GET
+  Calls: 1
+
+https://ad.doubleclick.net/activity;src=9812343;type=websi000;cat=flood00;ord=626908489;gtm=45g91e68l1v872399471z8812729902z9848341198za20kzb812729902zd812729902;dc_pre=1;u59=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256;u67=guest;u66=false;evnid=1787649237320_178764862409059;rcb=3;dma=0;npa=0;gcd=13l3l3l3l1l1;uaa=x86;uab=64;uafvl=Chromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0;uamb=0;uam=;uap=Linux;uapv=;uaw=0;pscdl=noapi;tag_exp=115938466~115938469~118032361~118897920~118897930~119367802~119367810~120385423;_tu=BA;gap.sstd=5;gap.gtb=1;s3p=1;_is_sw=f15s0t3;~oref=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256
+  Methods: GET
+  Calls: 1
+
+https://ad.doubleclick.net/activity;src=9812343;type=websi000;cat=flood0;ord=1360771357;gtm=45g91e68l1v872399471z8812729902z9848341198za20kzb812729902zd812729902;dc_pre=1;u59=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256;u67=guest;u66=false;evnid=1787649237320_178764862409080;rcb=3;dma=0;npa=0;gcd=13l3l3l3l1l1;uaa=x86;uab=64;uafvl=Chromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0;uamb=0;uam=;uap=Linux;uapv=;uaw=0;pscdl=noapi;auiddc=342220896.1787648318;tag_exp=115938466~115938469~117215459~118032361~118897920~118897930~119367802~119367810~120385423;_tu=BA;gap.sstd=5;gap.gtb=1;s3p=1;_is_sw=f15s0t11;~oref=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256
+  Methods: GET
+  Calls: 1
+
+https://api-iam.intercom.io/messenger/web/launcher_settings
+  Methods: POST
+  Calls: 2
+  Body structure: {
+    "_type": "application/x-www-form-urlencoded",
+    "_length": 426
+}
+
+https://api-iam.intercom.io/messenger/web/metrics
+  Methods: POST
+  Calls: 2
+  Body structure: {
+    "_type": "application/x-www-form-urlencoded",
+    "_length": 2313
+}
+
+https://api-iam.intercom.io/messenger/web/page_view_events
+  Methods: POST
+  Calls: 1
+  Body structure: {
+    "_type": "application/x-www-form-urlencoded",
+    "_length": 794
+}
+
+https://api-iam.intercom.io/messenger/web/ping
+  Methods: POST
+  Calls: 4
+  Body structure: {
+    "_type": "application/x-www-form-urlencoded",
+    "_length": 462
+}
+
+https://api.leonardo.ai/v1/graphql
+  Methods: POST
+  Calls: 180
+  Body structure: {
+    "_shape": {
+        "operationName": "str",
+        "variables": {
+            "version": "str",
+            "schemaIds": [
+                "str"
+            ]
+        },
+        "query": "str"
+    },
+    "_sample_keys": [
+        "operationName",
+        "variables",
+        "query"
+    ]
+}
+
+https://app.leonardo.ai/api-access
+  Methods: GET
+  Calls: 1
+
+https://app.leonardo.ai/api/auth/callback/cognito
+  Methods: GET
+  Calls: 1
+
+https://app.leonardo.ai/api/auth/cross-origin-cookie
+  Methods: GET
+  Calls: 1
+
+https://app.leonardo.ai/api/auth/get-session
+  Methods: GET
+  Calls: 7
+
+https://app.leonardo.ai/api/auth/intercom
+  Methods: GET
+  Calls: 1
+
+https://app.leonardo.ai/api/auth/sign-in/oauth2
+  Methods: POST
+  Calls: 1
+  Body structure: {
+    "_shape": {
+        "providerId": "str",
+        "callbackURL": "str",
+        "errorCallbackURL": "str",
+        "additionalData": {
+            "identity_provider": "str"
+        }
+    },
+    "_sample_keys": [
+        "providerId",
+        "callbackURL",
+        "errorCallbackURL",
+        "additionalData"
+    ]
+}
+
+https://app.leonardo.ai/api/content-security-report
+  Methods: POST
+  Calls: 2
+  Body structure: {
+    "_type": "application/csp-report",
+    "_length": 9714
+}
+
+https://app.leonardo.ai/generate
+  Methods: POST, GET
+  Calls: 20
+
+https://cdn.leonardo.ai/changelog_assets/1.6.7/introducing_features/videos/{id}.webm
+  Methods: GET
+  Calls: 1
+
+https://cdn.leonardo.ai/static/images/models/bfl/flux-3-video.webm
+  Methods: GET
+  Calls: 4
+
+https://cdn.leonardo.ai/static/images/models/bfl/flux-3-video.webp
+  Methods: GET
+  Calls: 1
+
+https://cdn.leonardo.ai/static/images/models/bytedance/seedance-2.5.webm
+  Methods: GET
+  Calls: 3
+
+https://cdn.leonardo.ai/static/images/models/bytedance/seedance-2.5.webp
+  Methods: GET
+  Calls: 1
+
+https://cdn.leonardo.ai/static/images/video/audio-reference.webp
+  Methods: GET
+  Calls: 1
+
+https://cdn.leonardo.ai/static/images/video/end-frame.webp
+  Methods: GET
+  Calls: 1
+
+https://cdn.leonardo.ai/static/images/video/models/hailuo-03.webm
+  Methods: GET
+  Calls: 3
+
+https://cdn.leonardo.ai/static/images/video/models/hailuo-03.webp
+  Methods: GET
+  Calls: 1
+
+https://cdn.leonardo.ai/static/images/video/start-frame.webp
+  Methods: GET
+  Calls: 1
+
+https://cdn.leonardo.ai/static/images/video/video-reference.webp
+  Methods: GET
+  Calls: 1
+
+https://cdn.leonardo.ai/users/{id}/generations/{id}/bytedance/seedance-2.5_cat_runng_in_ther_park-0.jpg
+  Methods: GET
+  Calls: 2
+
+https://cdn.leonardo.ai/users/{id}/generations/{id}/bytedance/seedance-2.5_cat_runng_in_ther_park-0.mp4
+  Methods: GET
+  Calls: 6
+
+https://cdn.leonardo.ai/users/{id}/generations/{id}/bytedance/seedance-2.5_generte_me_tusanami-0.jpg
+  Methods: GET
+  Calls: 1
+
+https://cdn.leonardo.ai/users/{id}/generations/{id}/bytedance/seedance-2.5_generte_me_tusanami-0.mp4
+  Methods: GET
+  Calls: 3
+
+https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/ci/a30964691942ec96/1787648278377/4KJUJFjh0DttR7yxNYVW7CwlX9CbcwUXc2A8mT2cXfE-1787648278-1.3.1.1-GtHs031QAiORTie7DdmZbXA6cPPKAsNAx9Nr9DE13ba3Lv5y3mZVoLAf_0Vbw3wGXlDRQB4NwcVbpjfPBYXYsjH5pr96kKAERDHHH_CSaZ1SK9A5yFQzsNBtk_df_xZfnYWWQ1zbyEch7bTk1tZzwQptovITMANFNvZrTgB4No07T7NjbQ2g5pw8lTGftSAv6XFkj_HYNvYuUf9iL8ryDUZhpk5J1fv7K7KseotKp__ScGla11IQOBs_eWkjOJe4B9m1Aw0T4n251g0I4MvS7tTnqZQ._Pa0XczBAQwX1FbXo_Mzthh7pvLfwn32zlaJ8aapIctq8cLpE1rgoFW3K1OGtJKyCJwTJOQTnVZ0OY7HlCb6uC7Vix6bO9duUqI.KBYev_Vkivu7pfsVF5vYTyyIL103aNMZ.S__G7IFBP7iO77W2K7jOyM00lHjTHFB8jYhQ8C7.xkXcWx82aH9b01MH95T8ETiR1shwiih1zeLSKw2Z9xg0AmcAM2VlPY6sNYzVTVz76Vw4vSuXNk5sw8RISznwfJaGcO89DH4TGOmli5E3WMVQ_6qcNL5sH7juEBX78o7rK.7agdt11wY2wBxWieK0ZPxOzJtFmgv10LtC7Pjcbvr0iOKlemWFj1XdVGQZlVzCzMlkp544X39Bh6IqI4L7J3UVZ.RddaDbBSl9ByfXu3wSSUp3eFyv.HvpaciqBEQkv3nhlhxSQhZnw
+  Methods: GET
+  Calls: 1
+
+https://challenges.cloudflare.com/turnstile/v0/api.js
+  Methods: GET
+  Calls: 1
+
+https://challenges.cloudflare.com/turnstile/v0/b/e694063b5082/api.js
+  Methods: GET
+  Calls: 1
+
+https://heapanalytics.com/api/add_user_properties_v3
+  Methods: GET
+  Calls: 4
+
+https://heapanalytics.com/api/identify_v3
+  Methods: GET
+  Calls: 1
+
+https://heapanalytics.com/api/telemetry
+  Methods: GET
+  Calls: 5
+
+https://identity.api.services.leonardo.ai/oidc/authorize
+  Methods: GET
+  Calls: 1
+
+https://identity.api.services.leonardo.ai/oidc/callback
+  Methods: GET
+  Calls: 1
+
+https://o13855.ingest.sentry.io/api/1765394/envelope/
+  Methods: POST
+  Calls: 1
+  Body structure: {
+    "_type": "text/plain;charset=UTF-8",
+    "_length": 456
+}
+
+https://o13855.ingest.sentry.io/api/4504058392018944/envelope/
+  Methods: POST
+  Calls: 2
+  Body structure: {
+    "_type": "text/plain;charset=UTF-8",
+    "_length": 456
+}
+
+https://o4504767521292288.ingest.sentry.io/api/4504767547179008/envelope/
+  Methods: POST
+  Calls: 19
+  Body structure: {
+    "_type": "text/plain;charset=UTF-8",
+    "_length": 489
+}
+
+https://payments.braintree-api.com/graphql
+  Methods: POST
+  Calls: 1
+  Body structure: {
+    "_shape": {
+        "clientSdkMetadata": {
+            "source": "str",
+            "integration": "str",
+            "sessionId": "str"
+        },
+        "query": "str",
+        "operationName": "str"
+    },
+    "_sample_keys": [
+        "clientSdkMetadata",
+        "query",
+        "operationName"
+    ]
+}
+
+https://sdk.iad-07.braze.com/api/v3/data/
+  Methods: POST
+  Calls: 3
+  Body structure: {
+    "_shape": {
+        "respond_with": {
+            "triggers": "bool",
+            "config": {
+                "config_time": "int"
+            }
+        },
+        "events": [
+            {
+                "name": "str",
+                "time": "float",
+                "data": {},
+                "session_id": "str"
+            }
+        ],
+        "device": {
+            "browser": "str",
+            "browser_version": "str",
+            "os_version": "str",
+            "resolution": "str",
+            "locale": "str",
+            "time_zone": "str",
+            "user_agent": "str"
+        },
+        "api_key": "str",
+        "time": "int",
+        "sdk_metadata": [
+            "str"
+        ],
+        "sdk_version": "str",
+        "device_id": "str"
+    },
+    "_sample_keys": [
+        "respond_with",
+        "events",
+        "device",
+        "api_key",
+        "time",
+        "sdk_metadata",
+        "sdk_version",
+        "device_id"
+    ]
+}
+
+https://www.canva.com/api/oauth/authorize
+  Methods: GET
+  Calls: 3
+
+https://www.google.com/gmp/conversion/_dc_unique_id=14734429150288158011;_dc_ptd=ChEI8Pq01AYQy62f0uiim6nlARIfAGS4-nifsxPw3dFbZBPHxGGtsDQNAPRq6RTXVVetLA;_dc_time=1787648318;src=9812343;type=retar00;cat=flood0;qty=1;gtm=45g91e68l1v872399471z8812729902z9848341198za20kzb812729902zd812729902;dc_pre=1;u6=DZ;evnid=1787649237320_178764862409080;rcb=3;dma=0;npa=0;gcd=13l3l3l3l1l1;uaa=x86;uab=64;uafvl=Chromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0;uamb=0;uam=;uap=Linux;uapv=;uaw=0;pscdl=noapi;auiddc=342220896.1787648318;tag_exp=115938466~115938469~117215459~118032361~118897920~118897930~119367802~119367810~120385423;_tu=BA;gap.sstd=5;gap.gtb=1;s3p=1;_is_sw=f15s0t11;~oref=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256
+  Methods: GET
+  Calls: 1
+
+https://www.google.com/gmp/conversion/_dc_unique_id=16374237606448351517;_dc_ptd=ChEI8Pq01AYQy62f0uiim6nlARIfAGS4-ngnd7swx-S0x79_VUZfm7Jny-PWaVOseHKZeg;_dc_time=1787648318;src=9812343;type=websi000;cat=flood0;ord=1360771357;gtm=45g91e68l1v872399471z8812729902z9848341198za20kzb812729902zd812729902;dc_pre=1;u59=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256;u67=guest;u66=false;evnid=1787649237320_178764862409080;rcb=3;dma=0;npa=0;gcd=13l3l3l3l1l1;uaa=x86;uab=64;uafvl=Chromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0;uamb=0;uam=;uap=Linux;uapv=;uaw=0;pscdl=noapi;auiddc=342220896.1787648318;tag_exp=115938466~115938469~117215459~118032361~118897920~118897930~119367802~119367810~120385423;_tu=BA;gap.sstd=5;gap.gtb=1;s3p=1;_is_sw=f15s0t11;~oref=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256
+  Methods: GET
+  Calls: 1
+
+https://www.google.com/gmp/conversion/_dc_unique_id=2804061623465962223;_dc_ptd=ChEI8Pq01AYQy62f0uiim6nlARIfAGS4-ngxIazgCDFzINb20s4D9ozrPffo7dVjh0zSZg;_dc_time=1787648318;cid=CAQS4QEAQM4h3BlZOTNKpwEvYNN71khiK6wkEa161u7BlAdlXk5uZ3b1WP8CiiCQeaDQAB9dxhoJblmEK_1mL_L5SOc0_vw52v68WbciMG-iMTkaOnj8HgHCREaV7WjRauYEZZqqa5jP4-6knmeb-Wyju2XwLT1hrRhuvW0cIIR36cxKq33DPXZ6iGAsa8f5QhKrZfBrO-O7CZS2gfJKQwC9_O9m-VkH-hkYnIePnJ4Q8z120GHZcrSg2sjBVAGL1pwXx3xtawP00zNqM05wbZASQgOYEgxec23EIt5V_m_9NG4d7WU;eps=AHas8cD9e1HlA2enQYUl1XMTcGZC6Oi4zHSukPYJQVTERDoxFJ1HSGCF0XkDiB4BsA90t5jlf1TFI_q_TsaRlm-i0LSSrZqMhF91tvcLQvQzznq8lA;src=9812343;type=paidm0;cat=canva00;ord=373180039;gtm=45g91e68l1v872399471z8812729902z9848341198za20kzb812729902zd812729902;dc_pre=1;evnid=1787649237320_178764862409099;rcb=3;dma=0;npa=0;gcd=13l3l3l3l1l1;uaa=x86;uab=64;uafvl=Chromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0;uamb=0;uam=;uap=Linux;uapv=;uaw=0;pscdl=noapi;tag_exp=115938466~115938469~118032361~118897920~118897930~119367802~119367810~120385423;_tu=BA;gap.sstd=5;gap.gtb=1;s3p=1;_is_sw=f15s0t18;~oref=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256
+  Methods: GET
+  Calls: 1
+
+https://www.google.com/gmp/conversion/_dc_unique_id=3941905105846553222;_dc_ptd=ChEI8Pq01AYQy62f0uiim6nlARIfAGS4-njpr3qtpHCD1D334rtZwvUN9N_fFftfda-P4w;_dc_time=1787648318;src=9812343;type=retar0;cat=flood1;ord=1;num=2103439502;gtm=45g91e68l1v872399471z8812729902z9848341198za20kzb812729902zd812729902;dc_pre=1;u67=guest;u66=false;evnid=1787649237320_178764862409080;rcb=3;dma=0;npa=0;gcd=13l3l3l3l1l1;uaa=x86;uab=64;uafvl=Chromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0;uamb=0;uam=;uap=Linux;uapv=;uaw=0;pscdl=noapi;auiddc=342220896.1787648318;em=tv.1;tag_exp=115938466~115938469~117215459~118032361~118897920~118897930~119367802~119367810~120385423;_tu=BA;gap.sstd=5;gap.gtb=1;s3p=1;_is_sw=f15s0t11;~oref=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256
+  Methods: GET
+  Calls: 1
+
+https://www.google.com/gmp/conversion/_dc_unique_id=4488664805380307873;_dc_ptd=ChEI8Pq01AYQy62f0uiim6nlARIfAGS4-ngjoBVC7J_d7Qyytj44qo_Sb0RP_ylTk5l-yg;_dc_time=1787648318;src=9812343;type=conve0;cat=canva008;ord=305359664;gtm=45g91e68l1v872399471z8812729902z9848341198za20kzb812729902zd812729902;dc_pre=1;u6=DZ;evnid=1787649237320_1787648624090120;rcb=3;dma=0;npa=0;gcd=13l3l3l3l1l1;uaa=x86;uab=64;uafvl=Chromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0;uamb=0;uam=;uap=Linux;uapv=;uaw=0;pscdl=noapi;tag_exp=115938466~115938469~117215454~118032361~118897920~118897930~119367802~119367810~120385423;_tu=BA;gap.sstd=5;gap.gtb=1;s3p=1;_is_sw=f15s0t22;~oref=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256
+  Methods: GET
+  Calls: 1
+
+https://www.google.com/gmp/conversion/_dc_unique_id=4621578613422646537;_dc_ptd=ChEI8Pq01AYQy62f0uiim6nlARIfAGS4-njG_sRkdIR5i322zIQ-389pjtgkJJvpC1WqBA;_dc_time=1787648318;src=9812343;type=retar0;cat=flood0;ord=887220538;gtm=45g91e68l1v872399471z8812729902z9848341198za20kzb812729902zd812729902;dc_pre=1;u67=guest;u66=false;evnid=1787649237320_178764862409080;rcb=3;dma=0;npa=0;gcd=13l3l3l3l1l1;uaa=x86;uab=64;uafvl=Chromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0;uamb=0;uam=;uap=Linux;uapv=;uaw=0;pscdl=noapi;auiddc=342220896.1787648318;tag_exp=115938466~115938469~117215459~118032361~118897920~118897930~119367802~119367810~120385423;_tu=BA;gap.sstd=5;gap.gtb=1;s3p=1;_is_sw=f15s0t11;~oref=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256
+  Methods: GET
+  Calls: 1
+
+https://www.google.com/gmp/conversion/_dc_unique_id=9506277575480555780;_dc_ptd=ChEI8Pq01AYQy62f0uiim6nlARIfAGS4-njufFBRK1nmL9Heui7M9rjEx18zWQvvMlabog;_dc_time=1787648318;cid=CAQS4QEAQM4h3NGEEo8A_NdtaMq9FOfW3GV4gUxD9t8oWAeb4bY5ELiJK05Dax4cuR6uWWXqBjsCGtjofgEVccV5zDN4Xyrpddak3qQpLsJHe5X-oba46aUYQEN2vK1s5CujxJEnzgx39u_H12w1nMjzvbUGmdHz-RcBiwDzrMVC0guVZCbdXJbJQuP5p0W2lcGHbYQNdURRT6gUj20DY5Sk7NRtuNqXeETNTlzEM_hV22Q9Tsl5cpnGr4urMFWSxOuBwARTVvNfZmzlnYg7dLVCD5ewo7UjFmUyHofK2wWYf3Ni8PE;eps=AHas8cBH8WRMOIZpGKe8p_PDcxgUmGHST_IMprK42r3V1m0lAKnyPqAUIfi4ANxAnPI8EoxuY3diRqEviP9ygsM7jrCeBVZ6JVfu5_upCPcmIRKqIQ;src=9812343;type=websi000;cat=flood00;ord=626908489;gtm=45g91e68l1v872399471z8812729902z9848341198za20kzb812729902zd812729902;dc_pre=1;u59=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256;u67=guest;u66=false;evnid=1787649237320_178764862409059;rcb=3;dma=0;npa=0;gcd=13l3l3l3l1l1;uaa=x86;uab=64;uafvl=Chromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0;uamb=0;uam=;uap=Linux;uapv=;uaw=0;pscdl=noapi;tag_exp=115938466~115938469~118032361~118897920~118897930~119367802~119367810~120385423;_tu=BA;gap.sstd=5;gap.gtb=1;s3p=1;_is_sw=f15s0t3;~oref=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256
+  Methods: GET
+  Calls: 1
+
+https://www.google.com/gmp/conversion/_dc_unique_id=9615081386269621782;_dc_ptd=ChEI8Pq01AYQy62f0uiim6nlARIfAGS4-ngqdS8eyJPHHNp8YPMNOInsOMiSSo7ZzFOW5Q;_dc_time=1787648318;src=9812343;type=paidm0;cat=canva0;ord=2026592803;gtm=45g91e68l1v872399471z8812729902z9848341198za20kzb812729902zd812729902;dc_pre=1;evnid=1787649237320_178764862409099;rcb=3;dma=0;npa=0;gcd=13l3l3l3l1l1;uaa=x86;uab=64;uafvl=Chromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0;uamb=0;uam=;uap=Linux;uapv=;uaw=0;pscdl=noapi;tag_exp=115938466~115938469~118032361~118897920~118897930~119367802~119367810~120385423;_tu=BA;gap.sstd=5;gap.gtb=1;s3p=1;_is_sw=f15s0t18;~oref=https%3A%2F%2Fwww.canva.com%2Flogin%2F%3Fredirect%3D%252Fapi%252Foauth%252Fauthorize%253Fclient_id%253DOC-AZoKbo6nFnx-%2526response_type%253Dcode%2526redirect_uri%253Dhttps%25253A%25252F%25252Fidentity.api.services.leonardo.ai%25252Foidc%25252Fcallback%2526scope%253Dopenid%252Bprofile%252Bprofile%25253Aread%252Bemail%252Basset%25253Aread%252Basset%25253Awrite%252Bfolder%25253Aread%252Bfolder%25253Awrite%2526state%253D422d5061-7e07-41bf-9137-33077140a07c%2526code_challenge%253DjO6DFiSVgsAQKjoUUBUIdqg7-zO-tT9KGHy-lsqZtMk%2526code_challenge_method%253DS256
+  Methods: GET
+  Calls: 1
+
+https://www.gstatic.com/recaptcha/api2/logo_48.png
+  Methods: GET
+  Calls: 1
+
+https://www.paypal.com/xoplatform/logger/api/logger
+  Methods: POST
+  Calls: 5
+  Body structure: {
+    "_shape": {
+        "events": [
+            {
+                "level": "str",
+                "event": "str",
+                "payload": {
+                    "env": "str",
+                    "timestamp": "int"
+                }
+            }
+        ],
+        "tracking": [
+            {
+                "api_integration_type": "str",
+                "app_id": "str",
+                "c_sdk_ver": "str",
+                "component": "str",
+                "merchant_sdk_env": "str",
+                "merchant_id": "str",
+                "event_source": "str",
+                "platform": "str",
+                "platform_version": "str",
+                "session_id": "str",
+                "client_session_id": "str",
+                "tenant_name": "str",
+                "product_name": "str",
+                "space_key": "str",
+                "auth_fingerprint": "str",
+                "event_name": "str",
+                "t": "int"
+            }
+        ]
+    },
+    "_sample_keys": [
+        "events",
+        "tracking"
+    ]
+}

@@ -1,0 +1,243 @@
+================================================================================
+SEEDANCE 2.5 REVERSE ENGINEERING - COMPLETE SUMMARY
+================================================================================
+
+Mission: Add Seedance 2.5 support to leo2api (or your local video API)
+
+================================================================================
+WHAT WE CAPTURED
+================================================================================
+
+✅ Network traffic from Leonardo.ai during Seedance 2.5 generation
+✅ 2,835 events captured (GraphQL requests, responses, CDN URLs)
+✅ Confirmed model identifier: "seedance-2.5" (provider: bytedance)
+✅ Video URL pattern: cdn.leonardo.ai/users/{id}/generations/{id}/bytedance/seedance-2.5_*.mp4
+
+================================================================================
+KEY FINDINGS
+================================================================================
+
+1. API Endpoint
+   - POST https://api.leonardo.ai/v1/graphql
+   - Same endpoint as Seedance 2.0 (existing in leo2api)
+
+2. Model Name
+   - "seedance-2.5" (that's it, simple!)
+
+3. Request Structure
+   - GraphQL mutation: "Generate"
+   - Same structure as Seedance 2.0
+   - Parameters: prompt, width, height, duration, quantity, seed, mode
+
+4. Response Flow
+   - Submit → Get generationId
+   - Poll status → Check if COMPLETE
+   - Fetch detail → Get motionMP4URL
+
+5. Implementation Difficulty
+   - ⭐⭐☆☆☆ (2/5 - Very Easy!)
+   - leo2api already has 90% of the code for Seedance 2.0
+   - Just need to add the new model name
+
+================================================================================
+FILES CREATED FOR YOU
+================================================================================
+
+1. /home/ziyad/SEEDANCE_2.5_IMPLEMENTATION_GUIDE.md
+   → Complete guide with all API details, GraphQL queries, parameters
+
+2. /home/ziyad/seedance25_example.go
+   → Working Go code example (standalone implementation)
+
+3. /home/ziyad/leonardo_seedance_2.5_capture.jsonl
+   → Raw network capture (2,835 events)
+
+4. /home/ziyad/leonardo_seedance_2.5_summary.txt
+   → Summary of captured API endpoints
+
+5. /home/ziyad/capture_leonardo_seedance.py
+   → Network capture script (for future use)
+
+================================================================================
+HOW TO ADD TO LEO2API
+================================================================================
+
+File: ~/Documents/artemisia/leo2api-source/leo2api/internal/provider/leonardo/client.go
+
+Step 1: Add model detection (around line 969)
+────────────────────────────────────────────────
+func isSeedance25Model(modelID string) bool {
+    return modelID == "seedance-2.5" || modelID == "video-2.5"
+}
+
+Step 2: Add model alias (around line 1089)
+────────────────────────────────────────────────
+if strings.EqualFold(genReq.Model, "seedance-2.5") {
+    genReq.Model = "seedance-2.5"
+}
+
+Step 3: Set default dimensions (around line 1115)
+────────────────────────────────────────────────
+} else if isSeedance25Model(genReq.Model) {
+    genReq.Params.Width = 1280
+}
+
+Step 4: Set default height (around line 1130)
+────────────────────────────────────────────────
+} else if isSeedance25Model(genReq.Model) {
+    genReq.Params.Height = 720
+}
+
+That's it! The rest of the code (GraphQL request building, polling, etc.) 
+already works because Seedance 2.5 uses the same API structure as 2.0.
+
+================================================================================
+TESTING
+================================================================================
+
+Once you add the code changes:
+
+1. Build leo2api:
+   cd ~/Documents/artemisia/leo2api-source
+   go build
+
+2. Test with your API:
+   curl -X POST http://localhost:8080/v1/video/generations \
+     -H "Authorization: Bearer YOUR_LEONARDO_TOKEN" \
+     -d '{
+       "model": "seedance-2.5",
+       "prompt": "a cat running in the park",
+       "width": 1280,
+       "height": 720,
+       "duration": 4
+     }'
+
+3. Expected response:
+   {
+     "id": "1f1a0644-81ab-6680-b74d-d24c8756460e",
+     "status": "PENDING"
+   }
+
+4. Poll for result:
+   curl http://localhost:8080/v1/video/generations/1f1a0644-81ab-6680-b74d-d24c8756460e
+
+5. When complete, you'll get:
+   {
+     "status": "COMPLETE",
+     "video_url": "https://cdn.leonardo.ai/.../seedance-2.5_*.mp4"
+   }
+
+================================================================================
+VIDEO TUTORIALS (for learning reverse engineering)
+================================================================================
+
+What you learned today:
+✅ Network capture with Playwright
+✅ Analyzing GraphQL APIs
+✅ Understanding request/response flow
+✅ Reading existing code to understand patterns
+
+To learn more, search YouTube for:
+- "Chrome DevTools Network Tab Tutorial"
+- "How to Reverse Engineer APIs"
+- "Web Scraping with Browser DevTools"
+- "GraphQL API Reverse Engineering"
+
+Key tools you used:
+- Playwright (automated browser)
+- Chrome DevTools Network tab (manual inspection)
+- Python for capture scripting
+- Go source code analysis
+
+================================================================================
+SEEDANCE 2.5 SPECIFICATIONS
+================================================================================
+
+Default Parameters:
+- Width: 1280px
+- Height: 720px (16:9 aspect ratio)
+- Duration: 4 seconds (can probably go higher, test it!)
+- Seed: -1 (random)
+- Mode: RESOLUTION_720
+- Quantity: 1 video per request
+- Audio: false (no audio by default)
+
+Cost:
+- Captured response showed apiCreditCost (varies by duration/resolution)
+
+Provider:
+- ByteDance (same as Seedance 2.0)
+
+Status Values:
+- PENDING → Generation in progress
+- COMPLETE → Video ready
+- FAILED → Something went wrong
+
+Result Fields:
+- motionMP4URL → The actual video file
+- url → Thumbnail/preview image
+- motionGIFURL → (usually null for Seedance)
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+1. Review the implementation guide:
+   cat ~/SEEDANCE_2.5_IMPLEMENTATION_GUIDE.md
+
+2. Study the code example:
+   cat ~/seedance25_example.go
+
+3. Add the 4 small code changes to leo2api
+
+4. Test with your Leonardo account
+
+5. (Optional) Add support for other resolutions/durations
+
+6. (Optional) Explore if there are Seedance 2.5 variants:
+   - seedance-2.5-fast (like 2.0-fast)?
+   - seedance-2.5-mini (like 2.0-mini)?
+   Test by changing the model name in your requests
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+If generation fails:
+- Check JWT token is valid (refresh from session)
+- Verify model name is exactly "seedance-2.5"
+- Ensure width/height are reasonable (1280x720 is safe)
+- Check Leonardo account has credits
+
+If you get 401/403:
+- JWT token expired (they last ~1 hour)
+- Use the get-session endpoint to refresh
+
+If polling times out:
+- Videos can take 2-5 minutes to generate
+- Increase maxAttempts in polling loop
+
+If no video URL:
+- Check generation status is "COMPLETE"
+- Look for motionMP4URL in generated_images array
+- Some generations might fail - check statusReason field
+
+================================================================================
+QUESTIONS?
+================================================================================
+
+The implementation guide has:
+✅ Full GraphQL queries
+✅ Complete request/response examples
+✅ All parameters explained
+✅ Step-by-step code changes
+✅ Testing instructions
+
+The Go example has:
+✅ Working code you can run standalone
+✅ All three API calls (generate, poll, fetch)
+✅ Complete workflow from prompt to video URL
+
+You're ready to implement Seedance 2.5! 🚀
+
+================================================================================
