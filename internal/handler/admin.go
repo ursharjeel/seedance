@@ -2027,7 +2027,7 @@ func (s *Server) runTokenRefreshBatchJob(jobID string, ids []string) {
 var startTime = time.Now()
 
 const (
-	maxRemoteImageBytes     = 20 << 20
+	maxRemoteImageBytes     = 25 << 20
 	maxRemoteVideoBytes     = 100 << 20
 	maxRemoteAudioBytes     = 50 << 20
 	remoteImageFetchTimeout = 300 * time.Second
@@ -2081,6 +2081,8 @@ func (s *Server) HandleLeonardoGenerate(w http.ResponseWriter, r *http.Request) 
 		Prompt        string `json:"prompt"`
 		Model         string `json:"model"`
 		Mode          string `json:"mode"`
+		Quality       string `json:"quality"`
+		Resolution    string `json:"resolution"`
 		Duration      int    `json:"duration"`
 		Width         int    `json:"width"`
 		Height        int    `json:"height"`
@@ -2108,6 +2110,12 @@ func (s *Server) HandleLeonardoGenerate(w http.ResponseWriter, r *http.Request) 
 			Type     string  `json:"type"`
 			Duration float64 `json:"duration"`
 		} `json:"video_reference,omitempty"`
+		VideoReferenceBase []struct {
+			URL      string  `json:"url"`
+			ID       string  `json:"id"`
+			Type     string  `json:"type"`
+			Duration float64 `json:"duration"`
+		} `json:"video_reference_base,omitempty"`
 		AudioReference []struct {
 			ID       string  `json:"id"`
 			URL      string  `json:"url"`
@@ -2118,6 +2126,9 @@ func (s *Server) HandleLeonardoGenerate(w http.ResponseWriter, r *http.Request) 
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, 400, map[string]string{"detail": "invalid request body"})
 		return
+	}
+	if len(body.VideoReferenceBase) > 0 {
+		body.VideoReference = append(body.VideoReference, body.VideoReferenceBase...)
 	}
 	if body.Prompt == "" {
 		writeJSON(w, 400, map[string]string{"detail": "prompt is required"})
@@ -2132,8 +2143,28 @@ func (s *Server) HandleLeonardoGenerate(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 400, map[string]string{"detail": "unsupported model"})
 		return
 	}
+	if isSeedanceModelID(modelID) {
+		if len(body.ImageGuidance) > maxPublicImageReferences {
+			writeJSON(w, 400, map[string]string{"detail": fmt.Sprintf("video-2.0 supports at most %d image references", maxPublicImageReferences)})
+			return
+		}
+		if len(body.VideoReference) > maxPublicVideoReferences {
+			writeJSON(w, 400, map[string]string{"detail": fmt.Sprintf("video-2.0 supports at most %d video references", maxPublicVideoReferences)})
+			return
+		}
+		if len(body.AudioReference) > maxPublicAudioReferences {
+			writeJSON(w, 400, map[string]string{"detail": fmt.Sprintf("video-2.0 supports at most %d audio references", maxPublicAudioReferences)})
+			return
+		}
+		for _, ref := range body.AudioReference {
+			if err := validateUploadedSeedanceAudioDuration(ref.Duration); err != nil {
+				writeJSON(w, 400, map[string]string{"detail": err.Error()})
+				return
+			}
+		}
+	}
 	if len(body.AudioReference) > 0 && !isSeedanceModelID(modelID) && !isMinimaxH3ModelID(modelID) {
-		writeJSON(w, 400, map[string]string{"detail": "audio_reference is only supported for video-2.0 Seedance models and minimax-h3 image-reference requests"})
+		writeJSON(w, 400, map[string]string{"detail": "audio_reference is only supported for video-2.0 Seedance models and minimax-h3 image/video-reference requests"})
 		return
 	}
 	if isSora2ModelID(modelID) && (len(body.ImageGuidance) > 0 || len(body.EndFrame) > 0 || len(body.VideoReference) > 0 || len(body.AudioReference) > 0) {
@@ -2196,10 +2227,6 @@ func (s *Server) HandleLeonardoGenerate(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if isMinimaxH3ModelID(modelID) {
-		if len(body.VideoReference) > 0 {
-			writeJSON(w, 400, map[string]string{"detail": "minimax-h3 does not support video_reference"})
-			return
-		}
 		if len(body.ImageGuidance) > maxPublicImageReferences {
 			writeJSON(w, 400, map[string]string{"detail": fmt.Sprintf("minimax-h3 supports at most %d image references", maxPublicImageReferences)})
 			return
@@ -2213,10 +2240,49 @@ func (s *Server) HandleLeonardoGenerate(w http.ResponseWriter, r *http.Request) 
 			writeJSON(w, 400, map[string]string{"detail": "minimax-h3 image-reference mode cannot be combined with start/end-frame mode"})
 			return
 		}
-		if len(body.AudioReference) > 0 && (len(body.ImageGuidance) == 0 || hasFrames) {
-			writeJSON(w, 400, map[string]string{"detail": "minimax-h3 audio_reference is only supported in image-reference mode"})
+		if len(body.VideoReference) > 3 || len(body.AudioReference) > 3 {
+			writeJSON(w, 400, map[string]string{"detail": "minimax-h3 supports at most 3 video and 3 audio references"})
 			return
 		}
+		if len(body.AudioReference) > 0 && len(body.ImageGuidance) == 0 && len(body.VideoReference) == 0 {
+			writeJSON(w, 400, map[string]string{"detail": "minimax-h3 audio_reference requires an image or video reference"})
+			return
+		}
+		if len(body.AudioReference) > 0 && hasFrames {
+			writeJSON(w, 400, map[string]string{"detail": "minimax-h3 audio_reference cannot be combined with start/end-frame mode"})
+			return
+		}
+		videoDuration, audioDuration := 0.0, 0.0
+		for _, ref := range body.VideoReference {
+			videoDuration += ref.Duration
+		}
+		for _, ref := range body.AudioReference {
+			audioDuration += ref.Duration
+		}
+		if videoDuration > 15 || audioDuration > 15 {
+			writeJSON(w, 400, map[string]string{"detail": "minimax-h3 reference duration must not exceed 15 seconds in total"})
+			return
+		}
+		if body.Quality == "" {
+			body.Quality = minimaxH3QualityFromModelID(requestedModelID)
+			if body.Quality == "" {
+				body.Quality = "STANDARD"
+			}
+		}
+		body.Quality = strings.ToUpper(strings.TrimSpace(body.Quality))
+		if body.Quality != "STANDARD" && body.Quality != "ACCELERATED" {
+			writeJSON(w, 400, map[string]string{"detail": "minimax-h3 quality must be STANDARD or ACCELERATED"})
+			return
+		}
+		resolutionProvided := strings.TrimSpace(body.Resolution) != ""
+		if !resolutionProvided {
+			if body.Quality == "ACCELERATED" {
+				body.Resolution = "768p"
+			} else {
+				body.Resolution = "2k"
+			}
+		}
+		body.Resolution = strings.ToLower(strings.TrimSpace(body.Resolution))
 		if body.Duration == 0 {
 			body.Duration = defaultMinimaxH3VideoDuration
 		}
@@ -2225,14 +2291,32 @@ func (s *Server) HandleLeonardoGenerate(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		defaultWidth, defaultHeight := defaultVideoSize(modelID)
+		if body.Width == 0 && body.Height == 0 {
+			if resolutionWidth, resolutionHeight, ok := minimaxH3SizeForResolution(body.Resolution); ok {
+				defaultWidth, defaultHeight = resolutionWidth, resolutionHeight
+			}
+		}
 		if body.Width == 0 {
 			body.Width = defaultWidth
 		}
 		if body.Height == 0 {
 			body.Height = defaultHeight
 		}
+		if !resolutionProvided {
+			if inferred := minimaxH3ResolutionForSize(body.Width, body.Height); inferred != "" {
+				body.Resolution = inferred
+			}
+		}
+		if !isAllowedMinimaxH3Resolution(body.Resolution) {
+			writeJSON(w, 400, map[string]string{"detail": "minimax-h3 resolution must be 480p, 768p, 2k, or 4k"})
+			return
+		}
+		if body.Quality == "ACCELERATED" && minimaxH3ResolutionIsHigh(body.Resolution) {
+			writeJSON(w, 400, map[string]string{"detail": "minimax-h3 accelerated quality supports 480p and 768p only"})
+			return
+		}
 		if !isAllowedMinimaxH3Size(body.Width, body.Height) {
-			writeJSON(w, 400, map[string]string{"detail": "minimax-h3 size must be one of 2560x1440, 1440x2560, 1440x1440, 1920x1440, 1440x1920, or 3360x1440"})
+			writeJSON(w, 400, map[string]string{"detail": "minimax-h3 size is unsupported; use a supported 480p, 768p, 2K, or 4K dimension"})
 			return
 		}
 		body.Mode = ""
@@ -2269,7 +2353,7 @@ func (s *Server) HandleLeonardoGenerate(w http.ResponseWriter, r *http.Request) 
 
 	// Build image refs (multi-image reference)
 	var imageRefs []leonardo.ImageRef
-	if len(body.ImageGuidance) > providerImageReferenceLimit {
+	if len(body.ImageGuidance) > providerImageReferenceLimit && !isMinimaxH3ModelID(modelID) {
 		sources := make([]imageReferenceSource, 0, len(body.ImageGuidance))
 		for _, ig := range body.ImageGuidance {
 			sources = append(sources, imageReferenceSource{
@@ -2380,6 +2464,8 @@ func (s *Server) HandleLeonardoGenerate(w http.ResponseWriter, r *http.Request) 
 		Params: leonardo.GenerateParams{
 			Prompt:         body.Prompt,
 			Mode:           body.Mode,
+			Quality:        body.Quality,
+			Resolution:     body.Resolution,
 			Duration:       body.Duration,
 			Width:          body.Width,
 			Height:         body.Height,
@@ -2818,7 +2904,10 @@ func (s *Server) resolveLeonardoVideoRef(session *leonardo.TokenSession, id, rem
 	if cache != nil {
 		cache[remoteURL] = uploadedID
 	}
-	if durationHint <= 0 {
+	// For URL references, the downloaded media duration is authoritative.
+	// A caller-provided hint must not hide a longer file from H3's 15-second
+	// aggregate video-reference limit.
+	if detectedDuration > 0 {
 		durationHint = detectedDuration
 	}
 	return leonardo.VideoRef{
@@ -2859,7 +2948,8 @@ func (s *Server) resolveLeonardoAudioRef(session *leonardo.TokenSession, id, rem
 	if cache != nil {
 		cache[remoteURL] = uploadedID
 	}
-	if durationHint <= 0 {
+	// The uploaded media metadata is authoritative for aggregate H3 limits.
+	if detectedDuration > 0 {
 		durationHint = detectedDuration
 	}
 	return leonardo.AudioRef{
@@ -3708,6 +3798,10 @@ func (s *Server) markTokenExhausted(tokenID string, reason string) {
 // Leonardo accepts a generation request. A later credits query can still
 // correct the exact balance if upstream adjusts it.
 func (s *Server) applyTokenCreditCost(tokenID string, creditCost int) {
+	s.applyTokenCreditCostForModel(tokenID, creditCost, "")
+}
+
+func (s *Server) applyTokenCreditCostForModel(tokenID string, creditCost int, modelID string) {
 	if tokenID == "" || creditCost <= 0 || s.TokenMgr == nil {
 		return
 	}
@@ -3735,7 +3829,9 @@ func (s *Server) applyTokenCreditCost(tokenID string, creditCost int) {
 		return
 	}
 	log.Printf("[poll] applied credit cost for token %s: -%d, %.0f remaining", tokenID, creditCost, next)
-	s.markTokenExhaustedIfBelowGenerationMinimum(tokenID, next, "remaining credits below video generation minimum after accepted generation")
+	if !isNanoBanana2LiteModelID(modelID) {
+		s.markTokenExhaustedIfBelowGenerationMinimum(tokenID, next, "remaining credits below video generation minimum after accepted generation")
+	}
 }
 
 func (s *Server) reportVideoGenerationSuccess(tokenID string, modelID string) {
@@ -4191,11 +4287,16 @@ func requiredCreditsForVideoModel(modelID string) (float64, bool) {
 }
 
 func requiredCreditsForVideoRequest(modelID string, videoReferenceMode bool) (float64, bool) {
-	canonicalModelID, ok := normalizeVideoModelID(modelID)
+	canonicalModelID, ok := normalizeImageModelID(modelID)
+	if !ok {
+		canonicalModelID, ok = normalizeVideoModelID(modelID)
+	}
 	if !ok {
 		canonicalModelID = strings.TrimSpace(modelID)
 	}
 	switch canonicalModelID {
+	case "nano-banana-2-lite":
+		return nanoBanana2LiteRequiredCredits, true
 	case "sora-2":
 		return sora2RequiredCredits, true
 	case "seedance-2.5":
@@ -4218,6 +4319,9 @@ func requiredCreditsForVideoRequest(modelID string, videoReferenceMode bool) (fl
 		}
 		return klingO3RequiredCredits, true
 	case "minimax-h3":
+		if videoReferenceMode {
+			return minimaxH3VideoRefRequiredCredits, true
+		}
 		return minimaxH3RequiredCredits, true
 	default:
 		return 0, false
@@ -4264,7 +4368,7 @@ func (s *Server) tokenCanRunModelByCredits(info map[string]interface{}, modelID 
 		return false
 	}
 	tokenID := strings.TrimSpace(toString(info["id"]))
-	if availableCredits < s.tokenExhaustionCreditThreshold() {
+	if !isNanoBanana2LiteModelID(modelID) && availableCredits < s.tokenExhaustionCreditThreshold() {
 		s.markTokenExhaustedIfBelowGenerationMinimum(tokenID, availableCredits, "remaining credits below video generation minimum")
 		return false
 	}

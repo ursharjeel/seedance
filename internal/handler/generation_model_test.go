@@ -50,6 +50,11 @@ func TestNormalizeVideoModelIDSupportsMinimaxH3(t *testing.T) {
 	if got := publicVideoModelID("hailuo-03"); got != "minimax-h3" {
 		t.Fatalf("publicVideoModelID(hailuo-03) = %q, want minimax-h3", got)
 	}
+	for _, input := range []string{"minimax-h3-standard", "minimax-h3-accelerated", "minimax-h3-fast"} {
+		if modelID, ok := normalizeVideoModelID(input); !ok || modelID != "minimax-h3" {
+			t.Fatalf("normalizeVideoModelID(%q) = %q, %v; want minimax-h3, true", input, modelID, ok)
+		}
+	}
 }
 
 func TestPublicRequestLogModelUsesMinimaxH3(t *testing.T) {
@@ -188,6 +193,19 @@ func TestMinimaxH3DefaultsAndAllowedValues(t *testing.T) {
 	}
 	if isAllowedMinimaxH3Size(1920, 1080) {
 		t.Fatal("1920x1080 should not be allowed for minimax-h3")
+	}
+}
+
+func TestMinimaxH3QualityAliases(t *testing.T) {
+	tests := map[string]string{
+		"minimax-h3-standard":    "STANDARD",
+		"minimax-h3-accelerated": "ACCELERATED",
+		"minimax-h3-fast":        "ACCELERATED",
+	}
+	for modelID, want := range tests {
+		if got := minimaxH3QualityFromModelID(modelID); got != want {
+			t.Fatalf("minimaxH3QualityFromModelID(%q) = %q, want %q", modelID, got, want)
+		}
 	}
 }
 

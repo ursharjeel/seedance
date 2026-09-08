@@ -19,6 +19,17 @@ import (
 
 var openAIModelCatalog = []map[string]interface{}{
 	{
+		"id":          "nano-banana-2-lite",
+		"object":      "model",
+		"owned_by":    "leonardo",
+		"description": "Nano Banana 2 Lite image generation",
+		"aliases":     []string{"nano_banana_2_lite", "gemini-flash-lite-3.1"},
+		"parameters": map[string]interface{}{
+			"n":    []int{1},
+			"size": []string{"1024x1024", "848x1264", "1376x768", "1264x848", "896x1200", "1152x928", "1584x672", "1200x896", "768x1376"},
+		},
+	},
+	{
 		"id":          "video-2.5",
 		"object":      "model",
 		"owned_by":    "leonardo",
@@ -117,13 +128,24 @@ var openAIModelCatalog = []map[string]interface{}{
 		},
 	},
 	{
-		"id":          "minimax-h3",
+		"id":          "minimax-h3-standard",
 		"object":      "model",
 		"owned_by":    "leonardo",
 		"description": "MiniMax Hailuo 03 video generation",
+		"aliases":     []string{"minimax-h3-accelerated"},
 		"parameters": map[string]interface{}{
-			"duration": []int{5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
-			"size":     []string{"2560x1440", "1440x2560", "1440x1440", "1920x1440", "1440x1920", "3360x1440"},
+			"duration":   []int{5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+			"quality":    []string{"STANDARD", "ACCELERATED"},
+			"resolution": []string{"480p", "768p", "2k", "4k"},
+			"size": []string{
+				"1120x480", "856x480", "640x480", "480x480", "480x640", "480x856",
+				"1792x768", "1376x768", "1024x768", "768x768", "768x1024", "768x1376",
+				"2560x1440", "1440x2560", "1440x1440", "1920x1440", "1440x1920", "3360x1440",
+				"5040x2160", "3840x2160", "2880x2160", "2160x2160", "2160x2880", "2160x3840",
+			},
+			"image_references": []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
+			"video_references": []int{0, 1, 2, 3},
+			"audio_references": []int{0, 1, 2, 3},
 		},
 	},
 }
@@ -147,7 +169,11 @@ const (
 	video2MiniRequired480pCredits   = 1200
 	klingO3RequiredCredits          = 4200
 	klingO3VideoRefRequiredCredits  = 3400
-	minimaxH3RequiredCredits        = 2100
+	// Captured Leonardo H3 requests cost 1,710 credits without video guidance
+	// and 2,850 credits when video references are included.
+	minimaxH3RequiredCredits        = 1710
+	minimaxH3VideoRefRequiredCredits = 2850
+	nanoBanana2LiteRequiredCredits  = 35
 	defaultTokenMaxRunningTasks     = 2
 	videoKo3ExhaustionCredits       = video2MiniRequired480pCredits
 	failedGenerationCreditsDelay    = 5 * time.Second
@@ -234,6 +260,16 @@ type asyncVideoGenerationContext struct {
 	StartedAt            time.Time
 }
 
+type asyncImageGenerationContext struct {
+	Session              *leonardo.TokenSession
+	TokenID              string
+	ModelID              string
+	PublicGenerationID   string
+	UpstreamGenerationID string
+	Attempt              int
+	StartedAt            time.Time
+}
+
 func (s *Server) expireStaleRunningLogs() int {
 	if s == nil || s.ReqLog == nil {
 		return 0
@@ -280,11 +316,268 @@ func (s *Server) HandleListModels(w http.ResponseWriter, r *http.Request) {
 
 // HandleImageGeneration handles POST /v1/images/generations.
 func (s *Server) HandleImageGeneration(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	if err := s.requireAPIKey(r); err != nil {
 		writeJSON(w, 401, errorResp("invalid api key", "authentication_error"))
 		return
 	}
-	writeJSON(w, 400, errorResp("image generation is not supported by this deployment; use /v1/video/generations with a supported video model", "invalid_request_error"))
+	var data map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		writeJSON(w, 400, errorResp("invalid request body", "invalid_request_error"))
+		return
+	}
+	prompt := strings.TrimSpace(toString(data["prompt"]))
+	if prompt == "" {
+		prompt = extractPromptFromMessages(data)
+	}
+	if len(prompt) < 3 {
+		writeJSON(w, 400, errorResp("prompt must contain at least 3 characters", "invalid_request_error"))
+		return
+	}
+	requestedModelID := strings.TrimSpace(toString(data["model"]))
+	if requestedModelID == "" {
+		requestedModelID = "nano-banana-2-lite"
+	}
+	modelID, ok := normalizeImageModelID(requestedModelID)
+	if !ok {
+		writeJSON(w, 400, errorResp("unsupported image model; available models are nano-banana-2-lite and its aliases", "invalid_request_error"))
+		return
+	}
+	data = normalizeNanoImageInputs(data)
+	width, height, ok := nanoBananaSizeFromRequest(data)
+	if !ok {
+		writeJSON(w, 400, errorResp("unsupported size; use one of the supported Nano Banana 2 Lite dimensions", "invalid_request_error"))
+		return
+	}
+	quantity := intFromValue(data["n"])
+	if quantity == 0 {
+		quantity = intFromValue(data["quantity"])
+	}
+	if quantity == 0 {
+		quantity = 1
+	}
+	if quantity != 1 {
+		writeJSON(w, 400, errorResp("nano-banana-2-lite supports n=1 only", "invalid_request_error"))
+		return
+	}
+	imageCount := countNanoImageReferences(data)
+	if imageCount > 6 {
+		writeJSON(w, 400, errorResp("nano-banana-2-lite supports at most 6 image references", "invalid_request_error"))
+		return
+	}
+	promptEnhance := nanoPromptEnhanceValue(data["prompt_enhance"])
+	if promptEnhance == "" || imageCount > 0 {
+		promptEnhance = "OFF"
+	}
+	if promptEnhance != "OFF" && promptEnhance != "ON" {
+		writeJSON(w, 400, errorResp("prompt_enhance must be ON or OFF", "invalid_request_error"))
+		return
+	}
+	styleIDs := nanoStyleIDs(data)
+	publicGenerationID := uuid.NewString()
+	createdAt := time.Now()
+	if s.ReqLog != nil {
+		s.ReqLog.Add(reqlog.Entry{
+			Timestamp: float64(createdAt.Unix()), StatusCode: http.StatusAccepted,
+			TaskStatus: "IN_PROGRESS", Type: "image", Model: publicImageModelID(modelID),
+			ModelParams: imageModelParams(width, height), Prompt: prompt,
+			GenerationID: publicGenerationID, UpstreamGenerationID: publicGenerationID,
+			Operation: "openai.image.generate",
+		})
+	}
+	go s.processImageGeneration(data, publicGenerationID, createdAt, prompt, modelID, width, height, quantity, promptEnhance, styleIDs)
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{
+		"id": publicGenerationID, "object": "image.generation", "created": createdAt.Unix(),
+		"model": publicImageModelID(modelID), "status": "in_progress",
+		"poll_url": imageGenerationPollURL(r.URL.Path, publicGenerationID), "request_id": publicGenerationID,
+	})
+}
+
+func (s *Server) processImageGeneration(data map[string]interface{}, publicGenerationID string, createdAt time.Time, prompt, modelID string, width, height, quantity int, promptEnhance string, styleIDs []string) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			s.markVideoGenerationFailure(publicGenerationID, http.StatusInternalServerError, fmt.Sprintf("generation worker failed: %v", recovered), createdAt)
+		}
+	}()
+	policy := s.loadGenerationRetryPolicy()
+	tried := make(map[string]bool)
+	var lastErr error
+	maxAttempts := policy.MaxAttempts
+	if s != nil && s.TokenMgr != nil && s.TokenMgr.Count() > maxAttempts {
+		maxAttempts = s.TokenMgr.Count()
+	}
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		session, tokenID, release := s.getLeonardoSessionForModelExcludingWithPreparationLease("", tried, modelID, false)
+		if session == nil {
+			break
+		}
+		imageRefs, _, _, videoRefs, audioRefs, err := s.resolveOpenAIVideoGuidanceInputs(data, session, modelID)
+		if err == nil && (len(videoRefs) > 0 || len(audioRefs) > 0) {
+			err = fmt.Errorf("nano-banana-2-lite accepts image references only")
+		}
+		if err == nil && len(imageRefs) > 6 {
+			err = fmt.Errorf("nano-banana-2-lite supports at most 6 image references")
+		}
+		if err != nil {
+			release()
+			lastErr = err
+			if attempt < maxAttempts && isRetryableGuidancePreparationError(err) && tokenID != "" {
+				tried[tokenID] = true
+				if s.TokenMgr != nil {
+					s.TokenMgr.ReportFail(tokenID)
+				}
+				if delay := policy.backoffDelay(attempt); delay > 0 {
+					time.Sleep(delay)
+				}
+				continue
+			}
+			break
+		}
+		request := &leonardo.GenerateRequest{Model: modelID, Public: true, Params: leonardo.GenerateParams{
+			Prompt: prompt, PromptEnhance: promptEnhance, Quantity: quantity,
+			Width: width, Height: height, StyleIDs: styleIDs, ImageRefs: imageRefs,
+		}}
+		result, generateErr := s.LeonardoClient.Generate(session, request)
+		release()
+		if generateErr == nil {
+			s.applyTokenCreditCostForModel(tokenID, result.APICreditCost, modelID)
+			accountName, accountEmail := s.resolveReqLogAccount(tokenID, session)
+			if s.ReqLog != nil {
+				s.ReqLog.UpdateSubmissionByGenerationID(publicGenerationID, result.GenerationID, tokenID, accountName, accountEmail, publicImageModelID(modelID), imageModelParams(width, height), result.APICreditCost, attempt)
+			}
+			timeout := 10 * time.Minute
+			if s.Config != nil {
+				timeout = time.Duration(s.Config.GetInt("generate_timeout", 600)) * time.Second
+			}
+			go s.trackLeonardoImageGeneration(&asyncImageGenerationContext{Session: session, TokenID: tokenID, ModelID: modelID, PublicGenerationID: publicGenerationID, UpstreamGenerationID: result.GenerationID, Attempt: attempt, StartedAt: createdAt}, 5*time.Second, timeout)
+			return
+		}
+		lastErr = generateErr
+		if tokenID != "" {
+			tried[tokenID] = true
+			if s.TokenMgr != nil {
+				s.TokenMgr.ReportFail(tokenID)
+			}
+		}
+		if attempt < maxAttempts && policy.retryAction(&videoGenerationAttemptFailure{StatusCode: statusCodeFromGenerationError(generateErr), Message: generateErr.Error()}, generationRetryPhaseSubmit) != generationRetryActionNone {
+			if delay := policy.backoffDelay(attempt); delay > 0 {
+				time.Sleep(delay)
+			}
+			continue
+		}
+		break
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("No tokens available")
+	}
+	s.markVideoGenerationFailure(publicGenerationID, http.StatusBadGateway, lastErr.Error(), createdAt)
+}
+
+func (s *Server) trackLeonardoImageGeneration(ctx *asyncImageGenerationContext, pollInterval, attemptTimeout time.Duration) {
+	if s == nil || ctx == nil || ctx.Session == nil || s.LeonardoClient == nil {
+		return
+	}
+	if pollInterval <= 0 {
+		pollInterval = 5 * time.Second
+	}
+	if attemptTimeout <= 0 {
+		attemptTimeout = 10 * time.Minute
+	}
+	deadline := time.Now().Add(attemptTimeout)
+	for time.Now().Before(deadline) {
+		time.Sleep(pollInterval)
+		status, err := s.LeonardoClient.PollGenerationStatus(ctx.Session, ctx.UpstreamGenerationID)
+		if err != nil {
+			continue
+		}
+		switch strings.ToUpper(strings.TrimSpace(status.Status)) {
+		case "FAILED":
+			if s.ReqLog != nil {
+				s.ReqLog.UpdateByGenerationID(ctx.PublicGenerationID, "FAILED", http.StatusBadGateway, "", "", "Leonardo image generation failed")
+				s.ReqLog.UpdateDuration(ctx.PublicGenerationID, time.Since(ctx.StartedAt).Seconds())
+			}
+			s.refreshTokenCredits(ctx.TokenID, ctx.Session)
+			return
+		case "COMPLETE":
+			detail, detailErr := s.LeonardoClient.GetGenerationDetail(ctx.Session, ctx.UpstreamGenerationID)
+			if detailErr != nil {
+				continue
+			}
+			previewURL := ""
+			for _, image := range detail.Images {
+				if strings.TrimSpace(image.URL) != "" {
+					previewURL = image.URL
+					break
+				}
+			}
+			if previewURL == "" {
+				continue
+			}
+			finalURL, materializeErr := s.materializeGeneratedMedia(previewURL, ctx.PublicGenerationID, "image")
+			if materializeErr != nil {
+				if s.ReqLog != nil {
+					s.ReqLog.UpdateByGenerationID(ctx.PublicGenerationID, "FAILED", http.StatusBadGateway, "", "", fmt.Sprintf("save generated media failed: %v", materializeErr))
+					s.ReqLog.UpdateDuration(ctx.PublicGenerationID, time.Since(ctx.StartedAt).Seconds())
+				}
+				s.refreshTokenCredits(ctx.TokenID, ctx.Session)
+				return
+			}
+			if s.ReqLog != nil {
+				s.ReqLog.UpdateByGenerationID(ctx.PublicGenerationID, "COMPLETE", http.StatusOK, finalURL, "image", "")
+				s.ReqLog.UpdateDuration(ctx.PublicGenerationID, time.Since(ctx.StartedAt).Seconds())
+			}
+			s.reportVideoGenerationSuccess(ctx.TokenID, ctx.ModelID)
+			s.refreshTokenCredits(ctx.TokenID, ctx.Session)
+			return
+		}
+	}
+	if s.ReqLog != nil {
+		s.ReqLog.UpdateByGenerationID(ctx.PublicGenerationID, "FAILED", http.StatusGatewayTimeout, "", "", "Generation timed out")
+		s.ReqLog.UpdateDuration(ctx.PublicGenerationID, time.Since(ctx.StartedAt).Seconds())
+	}
+	s.refreshTokenCredits(ctx.TokenID, ctx.Session)
+}
+
+// HandleImageGenerationStatus handles GET /v1/images/generations/{id}.
+func (s *Server) HandleImageGenerationStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.requireAPIKey(r); err != nil {
+		writeJSON(w, http.StatusUnauthorized, errorResp("invalid api key", "authentication_error"))
+		return
+	}
+	generationID := imageGenerationIDFromPath(r.URL.Path)
+	if generationID == "" || s.ReqLog == nil {
+		writeJSON(w, http.StatusNotFound, errorResp("generation not found", "not_found_error"))
+		return
+	}
+	entry, ok := s.ReqLog.FindByGenerationID(generationID)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, errorResp("generation not found", "not_found_error"))
+		return
+	}
+	response := map[string]interface{}{"id": generationID, "object": "image.generation", "created": int64(entry.Timestamp), "model": publicImageModelID(entry.Model), "request_id": generationID, "status": "in_progress"}
+	statusCode := http.StatusAccepted
+	switch strings.ToUpper(strings.TrimSpace(entry.TaskStatus)) {
+	case "COMPLETE":
+		response["status"] = "succeeded"
+		response["data"] = []map[string]interface{}{{"url": entry.PreviewURL}}
+		statusCode = http.StatusOK
+	case "FAILED":
+		response["status"] = "failed"
+		errorType := "server_error"
+		if entry.StatusCode >= http.StatusBadRequest && entry.StatusCode < http.StatusInternalServerError {
+			errorType = "invalid_request_error"
+		}
+		response["error"] = map[string]interface{}{"message": entry.ErrorMessage, "type": errorType}
+		statusCode = http.StatusOK
+	}
+	writeJSON(w, statusCode, response)
 }
 
 // HandleChatCompletions handles POST /v1/chat/completions.
@@ -330,12 +623,18 @@ func (s *Server) HandleVideoGeneration(w http.ResponseWriter, r *http.Request) {
 	}
 	modelID, ok := normalizeVideoModelID(requestedModelID)
 	if !ok {
-		writeJSON(w, 400, errorResp("unsupported model; available models are video-2.5, video-2.0, video-2.0-fast, video-2.0-mini, their 480p variants, sora2, ko3, and minimax-h3", "invalid_request_error"))
+		writeJSON(w, 400, errorResp("unsupported model; available models are video-2.5, video-2.0, video-2.0-fast, video-2.0-mini, their 480p variants, sora2, ko3, minimax-h3-standard, and minimax-h3-accelerated", "invalid_request_error"))
 		return
+	}
+	if isSeedanceModelID(modelID) {
+		if err := validateSeedanceReferenceCounts(data); err != nil {
+			writeJSON(w, 400, errorResp(err.Error(), "invalid_request_error"))
+			return
+		}
 	}
 	responseModelID := publicVideoModelID(modelID)
 	if hasAudioReferenceInput(data) && !isSeedanceModelID(modelID) && !isMinimaxH3ModelID(modelID) {
-		writeJSON(w, 400, errorResp("audio_reference is only supported for video-2.0 Seedance models and minimax-h3 image-reference requests", "invalid_request_error"))
+		writeJSON(w, 400, errorResp("audio_reference is only supported for video-2.0 Seedance models and minimax-h3 image/video-reference requests", "invalid_request_error"))
 		return
 	}
 	if isMinimaxH3ModelID(modelID) {
@@ -344,8 +643,25 @@ func (s *Server) HandleVideoGeneration(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	minimaxQuality, minimaxResolution := "", ""
+	if isMinimaxH3ModelID(modelID) {
+		var err error
+		minimaxQuality, minimaxResolution, err = minimaxH3RequestOptions(data)
+		if err != nil {
+			writeJSON(w, 400, errorResp(err.Error(), "invalid_request_error"))
+			return
+		}
+		if modelQuality := minimaxH3QualityFromModelID(requestedModelID); modelQuality != "" && strings.TrimSpace(toString(data["quality"])) == "" && strings.TrimSpace(toString(data["speed"])) == "" {
+			minimaxQuality = modelQuality
+			if minimaxQuality == "ACCELERATED" && strings.TrimSpace(toString(data["resolution"])) == "" {
+				minimaxResolution = "768p"
+			}
+		}
+		responseModelID = minimaxH3PublicModelID(minimaxQuality)
+	}
 	duration := defaultVideoDuration(modelID)
 	klingO3VideoRefMode := isKlingO3ModelID(modelID) && hasVideoReferenceInput(data)
+	videoReferenceMode := klingO3VideoRefMode || (isMinimaxH3ModelID(modelID) && hasVideoReferenceInput(data))
 	if klingO3VideoRefMode {
 		duration = defaultKlingO3VideoRefDuration
 	}
@@ -380,8 +696,18 @@ func (s *Server) HandleVideoGeneration(w http.ResponseWriter, r *http.Request) {
 	if klingO3VideoRefMode {
 		width, height = 0, 0
 	}
+	if isMinimaxH3ModelID(modelID) && !hasExplicitVideoDimensions(data) {
+		if resolutionWidth, resolutionHeight, ok := minimaxH3SizeForResolution(minimaxResolution); ok {
+			width, height = resolutionWidth, resolutionHeight
+		}
+	}
 	if aspectRatio := strings.TrimSpace(toString(data["aspect_ratio"])); aspectRatio != "" {
 		aspectWidth, aspectHeight, ok := videoSizeForAspectRatio(modelID, aspectRatio)
+		if isMinimaxH3ModelID(modelID) {
+			if resolutionWidth, resolutionHeight, resolutionOK := minimaxH3SizeForAspectRatio(minimaxResolution, aspectRatio); resolutionOK {
+				aspectWidth, aspectHeight, ok = resolutionWidth, resolutionHeight, true
+			}
+		}
 		if !ok {
 			writeJSON(w, 400, errorResp("unsupported aspect_ratio for model", "invalid_request_error"))
 			return
@@ -404,6 +730,13 @@ func (s *Server) HandleVideoGeneration(w http.ResponseWriter, r *http.Request) {
 	}
 	if h, ok := data["height"].(float64); ok {
 		height = int(h)
+	}
+	if isMinimaxH3ModelID(modelID) {
+		// Explicit width/height take precedence over a resolution hint, matching
+		// Leonardo's schema. Keep the emitted tier consistent with the dimensions.
+		if inferred := minimaxH3ResolutionForSize(width, height); inferred != "" {
+			minimaxResolution = inferred
+		}
 	}
 	if isKlingO3ModelID(modelID) && hasUnsupportedKlingO3GuidanceInput(data) {
 		writeJSON(w, 400, errorResp("ko3 currently supports text-to-video, image-reference image-to-video, and start/end-frame requests only", "invalid_request_error"))
@@ -430,7 +763,11 @@ func (s *Server) HandleVideoGeneration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isMinimaxH3ModelID(modelID) && !isAllowedMinimaxH3Size(width, height) {
-		writeJSON(w, 400, errorResp("minimax-h3 size must be one of 2560x1440, 1440x2560, 1440x1440, 1920x1440, 1440x1920, or 3360x1440", "invalid_request_error"))
+		writeJSON(w, 400, errorResp("minimax-h3 size is unsupported; use a supported 480p, 768p, 2K, or 4K dimension", "invalid_request_error"))
+		return
+	}
+	if isMinimaxH3ModelID(modelID) && minimaxQuality == "ACCELERATED" && minimaxH3ResolutionIsHigh(minimaxResolution) {
+		writeJSON(w, 400, errorResp("minimax-h3 accelerated quality supports 480p and 768p only", "invalid_request_error"))
 		return
 	}
 	if isSora2ModelID(modelID) && countSora2StartFrameInputs(data) > 1 {
@@ -443,13 +780,13 @@ func (s *Server) HandleVideoGeneration(w http.ResponseWriter, r *http.Request) {
 	if s.ReqLog != nil {
 		s.ReqLog.Add(reqlog.Entry{
 			Timestamp: float64(createdAt.Unix()), StatusCode: http.StatusAccepted,
-			TaskStatus: "IN_PROGRESS", Type: "video", Model: publicVideoModelID(modelID),
+			TaskStatus: "IN_PROGRESS", Type: "video", Model: responseModelID,
 			ModelParams: videoModelParams(modelID, width, height, duration), Prompt: prompt,
 			GenerationID: publicGenerationID, UpstreamGenerationID: publicGenerationID,
 			Operation: "openai.video.generate",
 		})
 	}
-	go s.processVideoGeneration(data, publicGenerationID, createdAt, prompt, modelID, duration, width, height, klingO3VideoRefMode)
+	go s.processVideoGeneration(data, publicGenerationID, createdAt, prompt, modelID, duration, width, height, videoReferenceMode, minimaxQuality, minimaxResolution)
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
 		"id": publicGenerationID, "object": "video.generation", "created": createdAt.Unix(),
 		"model": responseModelID, "status": "in_progress",
@@ -461,7 +798,7 @@ func (s *Server) HandleVideoGeneration(w http.ResponseWriter, r *http.Request) {
 // Leonardo submission outside the HTTP request. Cloudflare (and other proxies)
 // can therefore receive the 202 acknowledgement immediately even when an
 // uploaded reference takes minutes to fetch or stage.
-func (s *Server) processVideoGeneration(data map[string]interface{}, publicGenerationID string, createdAt time.Time, prompt, modelID string, duration, width, height int, klingO3VideoRefMode bool) {
+func (s *Server) processVideoGeneration(data map[string]interface{}, publicGenerationID string, createdAt time.Time, prompt, modelID string, duration, width, height int, klingO3VideoRefMode bool, minimaxQuality, minimaxResolution string) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			s.markVideoGenerationFailure(publicGenerationID, http.StatusInternalServerError, fmt.Sprintf("generation worker failed: %v", recovered), createdAt)
@@ -474,6 +811,9 @@ func (s *Server) processVideoGeneration(data map[string]interface{}, publicGener
 	var lastTokenID string
 	var lastSession *leonardo.TokenSession
 	motionHasAudio := motionHasAudioFromRequest(data)
+	if isMinimaxH3ModelID(modelID) {
+		motionHasAudio = true
+	}
 
 	maxAttempts := retryPolicy.MaxAttempts
 	if s != nil && s.TokenMgr != nil {
@@ -502,6 +842,22 @@ func (s *Server) processVideoGeneration(data map[string]interface{}, publicGener
 			err = guidancePackErr
 		} else {
 			imageRefs, startFrames, endFrames, videoRefs, audioRefs, err = s.resolveOpenAIVideoGuidanceInputs(guidanceData, session, modelID)
+			if err == nil && isMinimaxH3ModelID(modelID) {
+				videoReferenceDuration := 0.0
+				for _, ref := range videoRefs {
+					videoReferenceDuration += ref.Duration
+				}
+				if videoReferenceDuration > 15 {
+					err = fmt.Errorf("minimax-h3 video reference duration must not exceed 15 seconds in total (measured %.3f seconds)", videoReferenceDuration)
+				}
+				audioReferenceDuration := 0.0
+				for _, ref := range audioRefs {
+					audioReferenceDuration += ref.Duration
+				}
+				if err == nil && audioReferenceDuration > 15 {
+					err = fmt.Errorf("minimax-h3 audio reference duration must not exceed 15 seconds in total (measured %.3f seconds)", audioReferenceDuration)
+				}
+			}
 		}
 		if err != nil {
 			if isRetryableGuidancePreparationError(err) {
@@ -531,12 +887,16 @@ func (s *Server) processVideoGeneration(data map[string]interface{}, publicGener
 			return
 		}
 
-		submission, failure := s.submitLeonardoVideoGeneration(session, usedTokenID, attempt, prompt, modelID, duration, width, height, motionHasAudio, imageRefs, startFrames, endFrames, videoRefs, audioRefs)
+		submission, failure := s.submitLeonardoVideoGeneration(session, usedTokenID, attempt, prompt, modelID, duration, width, height, motionHasAudio, minimaxQuality, minimaxResolution, imageRefs, startFrames, endFrames, videoRefs, audioRefs)
 		if failure == nil {
 			releaseTokenPreparation()
 			accountName, accountEmail := s.resolveReqLogAccount(usedTokenID, session)
 			if s.ReqLog != nil {
-				s.ReqLog.UpdateSubmissionByGenerationID(publicGenerationID, submission.UpstreamGenerationID, usedTokenID, accountName, accountEmail, publicVideoModelID(modelID), videoModelParams(modelID, width, height, duration), submission.CreditCost, attempt)
+				logModelID := publicVideoModelID(modelID)
+				if isMinimaxH3ModelID(modelID) {
+					logModelID = minimaxH3PublicModelID(minimaxQuality)
+				}
+				s.ReqLog.UpdateSubmissionByGenerationID(publicGenerationID, submission.UpstreamGenerationID, usedTokenID, accountName, accountEmail, logModelID, videoModelParams(modelID, width, height, duration), submission.CreditCost, attempt)
 			}
 			attemptTimeout := 10 * time.Minute
 			if s.Config != nil {
@@ -1017,10 +1377,263 @@ func normalizeVideoModelID(modelID string) (string, bool) {
 		return "sora-2", true
 	case "ko3", "kling-o3", "kling-video-o-3":
 		return "kling-video-o-3", true
-	case "minimax-h3":
+	case "minimax-h3-standard", "minimax-h3-accelerated":
 		return "minimax-h3", true
 	default:
 		return "", false
+	}
+}
+
+func normalizeImageModelID(modelID string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(modelID)) {
+	case "nano-banana-2-lite", "nano_banana_2_lite", "nano-banana-lite-2", "gemini-flash-lite-3.1":
+		return "nano-banana-2-lite", true
+	default:
+		return "", false
+	}
+}
+
+func publicImageModelID(modelID string) string {
+	if normalized, ok := normalizeImageModelID(modelID); ok {
+		return normalized
+	}
+	return strings.TrimSpace(modelID)
+}
+
+func isNanoBanana2LiteModelID(modelID string) bool {
+	_, ok := normalizeImageModelID(modelID)
+	return ok
+}
+
+func imageModelParams(width, height int) string {
+	return fmt.Sprintf("%dx%d", width, height)
+}
+
+func imageGenerationPollURL(requestPath, generationID string) string {
+	return "/v1/images/generations/" + strings.TrimSpace(generationID)
+}
+
+func imageGenerationIDFromPath(path string) string {
+	return extractPathParam(path, "/v1/images/generations/")
+}
+
+func intFromValue(value interface{}) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case json.Number:
+		parsed, _ := strconv.Atoi(string(v))
+		return parsed
+	case string:
+		parsed, _ := strconv.Atoi(strings.TrimSpace(v))
+		return parsed
+	default:
+		return 0
+	}
+}
+
+func normalizeNanoImageInputs(data map[string]interface{}) map[string]interface{} {
+	if data == nil {
+		return map[string]interface{}{}
+	}
+	cloned := cloneImageReferencePayload(data)
+	if _, exists := cloned["image_url"]; !exists {
+		if image, ok := cloned["image"].(string); ok && strings.TrimSpace(image) != "" {
+			cloned["image_url"] = image
+		}
+	}
+	if _, exists := cloned["image_urls"]; !exists {
+		if images, ok := cloned["image"].([]interface{}); ok {
+			cloned["image_guidance"] = normalizeNanoImageList(images)
+		}
+	} else if images, ok := cloned["image_urls"].([]interface{}); ok {
+		for _, image := range images {
+			if _, isObject := image.(map[string]interface{}); isObject {
+				cloned["image_guidance"] = normalizeNanoImageList(images)
+				delete(cloned, "image_urls")
+				break
+			}
+		}
+	}
+	if image, ok := cloned["image"].(map[string]interface{}); ok {
+		if url := nanoImageURLFromValue(image); url != "" {
+			cloned["image_url"] = url
+		} else if id := strings.TrimSpace(toString(image["id"])); id != "" {
+			cloned["image_guidance"] = []interface{}{map[string]interface{}{"id": id, "type": "GENERATED"}}
+		}
+	}
+	if image, ok := cloned["image_url"].(map[string]interface{}); ok {
+		if url := strings.TrimSpace(toString(image["url"])); url != "" {
+			cloned["image_url"] = url
+		} else if id := strings.TrimSpace(toString(image["id"])); id != "" {
+			cloned["image_guidance"] = []interface{}{map[string]interface{}{"id": id, "type": "GENERATED"}}
+		}
+	}
+	if raw, ok := cloned["image_url"].([]interface{}); ok {
+		cloned["image_urls"] = raw
+		delete(cloned, "image_url")
+	}
+	return cloned
+}
+
+func normalizeNanoImageList(values []interface{}) []interface{} {
+	result := make([]interface{}, 0, len(values))
+	for _, value := range values {
+		if url := nanoImageURLFromValue(value); url != "" {
+			result = append(result, map[string]interface{}{"url": url, "type": "UPLOADED"})
+			continue
+		}
+		if id := nanoImageIDFromValue(value); id != "" {
+			result = append(result, map[string]interface{}{"id": id, "type": "GENERATED"})
+		}
+	}
+	return result
+}
+
+func nanoImageURLFromValue(value interface{}) string {
+	if raw, ok := value.(string); ok {
+		return strings.TrimSpace(raw)
+	}
+	entry, ok := value.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	if nested, ok := entry["image_url"].(map[string]interface{}); ok {
+		if url := strings.TrimSpace(toString(nested["url"])); url != "" {
+			return url
+		}
+	}
+	return strings.TrimSpace(toString(entry["url"]))
+}
+
+func nanoImageIDFromValue(value interface{}) string {
+	entry, ok := value.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(toString(entry["id"]))
+}
+
+func nanoStyleIDs(data map[string]interface{}) []string {
+	var result []string
+	if raw, ok := data["style_ids"].([]interface{}); ok {
+		for _, value := range raw {
+			if style := strings.TrimSpace(toString(value)); style != "" {
+				result = append(result, style)
+			}
+		}
+	} else if raw, ok := data["style_ids"].([]string); ok {
+		result = append(result, raw...)
+	}
+	if len(result) == 0 {
+		if style := strings.TrimSpace(toString(data["style_id"])); style != "" {
+			result = []string{style}
+		}
+	}
+	if len(result) == 0 {
+		result = []string{"111dc692-d470-4eec-b791-3475abac4c46"}
+	}
+	return result
+}
+
+func nanoPromptEnhanceValue(value interface{}) string {
+	switch typed := value.(type) {
+	case bool:
+		if typed {
+			return "ON"
+		}
+		return "OFF"
+	default:
+		return strings.ToUpper(strings.TrimSpace(toString(value)))
+	}
+}
+
+func nanoBananaSizeFromRequest(data map[string]interface{}) (int, int, bool) {
+	width, height := intFromValue(data["width"]), intFromValue(data["height"])
+	if width == 0 || height == 0 {
+		if size := strings.TrimSpace(toString(data["size"])); size != "" {
+			parts := strings.Split(strings.ToLower(size), "x")
+			if len(parts) == 2 {
+				width, height = intFromValue(parts[0]), intFromValue(parts[1])
+			}
+		}
+	}
+	if width == 0 || height == 0 {
+		switch strings.TrimSpace(toString(data["aspect_ratio"])) {
+		case "2:3":
+			width, height = 848, 1264
+		case "16:9":
+			width, height = 1376, 768
+		case "3:2":
+			width, height = 1264, 848
+		case "3:4":
+			width, height = 896, 1200
+		case "5:4":
+			width, height = 1152, 928
+		case "21:9":
+			width, height = 1584, 672
+		case "4:3":
+			width, height = 1200, 896
+		case "9:16":
+			width, height = 768, 1376
+		default:
+			width, height = 1024, 1024
+		}
+	}
+	return width, height, isAllowedNanoBanana2LiteSize(width, height)
+}
+
+func countNanoImageReferences(data map[string]interface{}) int {
+	count := 0
+	if strings.TrimSpace(toString(data["image_url"])) != "" {
+		count++
+	}
+	if raw, ok := data["image_urls"].([]interface{}); ok {
+		for _, value := range raw {
+			if strings.TrimSpace(toString(value)) != "" {
+				count++
+			}
+		}
+	}
+	for _, raw := range []interface{}{data["image_guidance"], data["image_reference"]} {
+		if entries, ok := raw.([]interface{}); ok {
+			for _, entry := range entries {
+				if validImageReferenceEntry(entry) {
+					count++
+				}
+			}
+		}
+	}
+	if guidances, ok := data["guidances"].(map[string]interface{}); ok {
+		if entries, ok := guidances["image_reference"].([]interface{}); ok {
+			for _, entry := range entries {
+				if validImageReferenceEntry(entry) {
+					count++
+				}
+			}
+		}
+	}
+	return count
+}
+
+func isAllowedNanoBanana2LiteSize(width, height int) bool {
+	switch {
+	case width == 1024 && height == 1024,
+		width == 848 && height == 1264,
+		width == 1376 && height == 768,
+		width == 1264 && height == 848,
+		width == 896 && height == 1200,
+		width == 1152 && height == 928,
+		width == 1584 && height == 672,
+		width == 1200 && height == 896,
+		width == 768 && height == 1376:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1044,11 +1657,22 @@ func publicVideoModelID(modelID string) string {
 		return "sora2"
 	case "kling-video-o-3", "kling-o3", "ko3":
 		return "ko3"
+	case "minimax-h3-standard":
+		return "minimax-h3-standard"
+	case "minimax-h3-accelerated", "minimax-h3-fast":
+		return "minimax-h3-accelerated"
 	case "hailuo-03", "minimax-h3":
-		return "minimax-h3"
+		return "minimax-h3-standard"
 	default:
 		return strings.TrimSpace(modelID)
 	}
+}
+
+func minimaxH3PublicModelID(quality string) string {
+	if strings.EqualFold(strings.TrimSpace(quality), "ACCELERATED") {
+		return "minimax-h3-accelerated"
+	}
+	return "minimax-h3-standard"
 }
 
 func publicRequestLogModel(modelID string) string {
@@ -1078,10 +1702,21 @@ func isKlingO3ModelID(modelID string) bool {
 
 func isMinimaxH3ModelID(modelID string) bool {
 	switch strings.TrimSpace(modelID) {
-	case "hailuo-03", "minimax-h3":
+	case "hailuo-03", "minimax-h3", "minimax-h3-standard", "minimax-h3-accelerated", "minimax-h3-fast":
 		return true
 	default:
 		return false
+	}
+}
+
+func minimaxH3QualityFromModelID(modelID string) string {
+	switch strings.ToLower(strings.TrimSpace(modelID)) {
+	case "minimax-h3-accelerated", "minimax-h3-fast":
+		return "ACCELERATED"
+	case "minimax-h3-standard":
+		return "STANDARD"
+	default:
+		return ""
 	}
 }
 
@@ -1260,12 +1895,131 @@ func isAllowedMinimaxH3Duration(duration int) bool {
 }
 
 func isAllowedMinimaxH3Size(width int, height int) bool {
-	return (width == 2560 && height == 1440) ||
+	return (width == 1120 && height == 480) ||
+		(width == 856 && height == 480) ||
+		(width == 640 && height == 480) ||
+		(width == 480 && height == 480) ||
+		(width == 480 && height == 640) ||
+		(width == 480 && height == 856) ||
+		(width == 1792 && height == 768) ||
+		(width == 1376 && height == 768) ||
+		(width == 1024 && height == 768) ||
+		(width == 768 && height == 768) ||
+		(width == 768 && height == 1024) ||
+		(width == 768 && height == 1376) ||
+		(width == 2560 && height == 1440) ||
 		(width == 1440 && height == 2560) ||
 		(width == 1440 && height == 1440) ||
 		(width == 1920 && height == 1440) ||
 		(width == 1440 && height == 1920) ||
-		(width == 3360 && height == 1440)
+		(width == 3360 && height == 1440) ||
+		(width == 5040 && height == 2160) ||
+		(width == 3840 && height == 2160) ||
+		(width == 2880 && height == 2160) ||
+		(width == 2160 && height == 2160) ||
+		(width == 2160 && height == 2880) ||
+		(width == 2160 && height == 3840) ||
+		(width == 0 && height == 0)
+}
+
+func isAllowedMinimaxH3Resolution(resolution string) bool {
+	switch strings.ToLower(strings.TrimSpace(resolution)) {
+	case "480p", "768p", "2k", "4k":
+		return true
+	default:
+		return false
+	}
+}
+
+func minimaxH3ResolutionIsHigh(resolution string) bool {
+	return strings.EqualFold(strings.TrimSpace(resolution), "2k") || strings.EqualFold(strings.TrimSpace(resolution), "4k")
+}
+
+func minimaxH3SizeForResolution(resolution string) (int, int, bool) {
+	switch strings.ToLower(strings.TrimSpace(resolution)) {
+	case "480p":
+		return 1120, 480, true
+	case "768p":
+		return 1376, 768, true
+	case "2k":
+		return 2560, 1440, true
+	case "4k":
+		return 3840, 2160, true
+	default:
+		return 0, 0, false
+	}
+}
+
+func minimaxH3SizeForAspectRatio(resolution, aspectRatio string) (int, int, bool) {
+	resolution = strings.ToLower(strings.TrimSpace(resolution))
+	aspectRatio = strings.TrimSpace(aspectRatio)
+	sizes := map[string]map[string][2]int{
+		"480p": {"16:9": {1120, 480}, "9:16": {480, 856}, "1:1": {480, 480}, "4:3": {640, 480}, "3:4": {480, 640}},
+		"768p": {"16:9": {1792, 768}, "9:16": {768, 1376}, "1:1": {768, 768}, "4:3": {1024, 768}, "3:4": {768, 1024}},
+		"2k":   {"16:9": {2560, 1440}, "9:16": {1440, 2560}, "1:1": {1440, 1440}, "4:3": {1920, 1440}, "3:4": {1440, 1920}, "21:9": {3360, 1440}},
+		"4k":   {"16:9": {3840, 2160}, "9:16": {2160, 3840}, "1:1": {2160, 2160}, "4:3": {2880, 2160}, "3:4": {2160, 2880}, "21:9": {5040, 2160}},
+	}
+	if byRatio, ok := sizes[resolution]; ok {
+		if size, ok := byRatio[aspectRatio]; ok {
+			return size[0], size[1], true
+		}
+	}
+	return 0, 0, false
+}
+
+func minimaxH3ResolutionForSize(width, height int) string {
+	switch {
+	case width == 1120 || width == 856 || width == 640 || (width == 480 && height <= 856):
+		return "480p"
+	case width == 1792 || width == 1376 || width == 1024 || (width == 768 && height <= 1376):
+		return "768p"
+	case width == 3360 || width == 2560 || width == 1920 || (width == 1440 && height <= 2560):
+		return "2k"
+	case width == 5040 || width == 3840 || width == 2880 || width == 2160:
+		return "4k"
+	default:
+		return ""
+	}
+}
+
+func hasExplicitVideoDimensions(data map[string]interface{}) bool {
+	if data == nil {
+		return false
+	}
+	for _, key := range []string{"size", "aspect_ratio", "width", "height"} {
+		if strings.TrimSpace(toString(data[key])) != "" && toString(data[key]) != "0" {
+			return true
+		}
+	}
+	return false
+}
+
+func minimaxH3RequestOptions(data map[string]interface{}) (string, string, error) {
+	quality := strings.ToUpper(strings.TrimSpace(toString(data["quality"])))
+	if quality == "" {
+		quality = strings.ToUpper(strings.TrimSpace(toString(data["speed"])))
+	}
+	if quality == "" {
+		quality = "STANDARD"
+	}
+	if quality != "STANDARD" && quality != "ACCELERATED" {
+		return "", "", fmt.Errorf("minimax-h3 quality must be STANDARD or ACCELERATED")
+	}
+	resolution := strings.ToLower(strings.TrimSpace(toString(data["resolution"])))
+	if resolution == "" {
+		if quality == "ACCELERATED" {
+			resolution = "768p"
+		} else {
+			resolution = "2k"
+		}
+	}
+	if !isAllowedMinimaxH3Resolution(resolution) {
+		return "", "", fmt.Errorf("minimax-h3 resolution must be 480p, 768p, 2k, or 4k")
+	}
+	if quality == "ACCELERATED" && minimaxH3ResolutionIsHigh(resolution) && !hasExplicitVideoDimensions(data) {
+		return "", "", fmt.Errorf("minimax-h3 accelerated quality supports 480p and 768p only")
+	}
+	return quality, resolution, nil
 }
 
 func isAllowedKlingO3Duration(duration int, videoReferenceMode bool) bool {
@@ -1297,9 +2051,20 @@ func hasVideoReferenceInput(data map[string]interface{}) bool {
 	if strings.TrimSpace(toString(data["video_url"])) != "" {
 		return true
 	}
-	if rawVideos, ok := data["video_reference"].([]interface{}); ok {
+	for _, field := range []string{"video_reference", "video_reference_base"} {
+		rawVideos, ok := data[field].([]interface{})
+		if !ok {
+			guidances, _ := data["guidances"].(map[string]interface{})
+			rawVideos, ok = guidances[field].([]interface{})
+		}
+		if !ok {
+			continue
+		}
 		for _, item := range rawVideos {
 			entry, _ := item.(map[string]interface{})
+			if video, ok := entry["video"].(map[string]interface{}); ok {
+				entry = video
+			}
 			if strings.TrimSpace(toString(entry["id"])) != "" || strings.TrimSpace(toString(entry["url"])) != "" {
 				return true
 			}
@@ -1405,9 +2170,6 @@ func validateMinimaxH3GuidanceInput(data map[string]interface{}) error {
 	endCount := countFrameInputs(data, "end_image_url", "end_frame")
 	hasFrames := startCount > 0 || endCount > 0
 
-	if hasVideoReferenceInput(data) {
-		return fmt.Errorf("minimax-h3 does not support video_reference")
-	}
 	if imageCount > maxPublicImageReferences {
 		return fmt.Errorf("minimax-h3 supports at most %d image references", maxPublicImageReferences)
 	}
@@ -1417,10 +2179,106 @@ func validateMinimaxH3GuidanceInput(data map[string]interface{}) error {
 	if hasFrames && imageCount > 0 {
 		return fmt.Errorf("minimax-h3 image-reference mode cannot be combined with start/end-frame mode")
 	}
-	if hasAudioReferenceInput(data) && (imageCount == 0 || hasFrames) {
-		return fmt.Errorf("minimax-h3 audio_reference is only supported in image-reference mode")
+	videoCount, videoDuration := countMinimaxH3VideoReferences(data)
+	if videoCount > 3 {
+		return fmt.Errorf("minimax-h3 supports at most 3 video references")
+	}
+	if minimaxH3VideoReferenceMissingDuration(data) {
+		return fmt.Errorf("minimax-h3 video references with an id require duration")
+	}
+	if videoDuration > 15 {
+		return fmt.Errorf("minimax-h3 video reference duration must not exceed 15 seconds in total")
+	}
+	if hasFrames && videoCount > 0 {
+		return fmt.Errorf("minimax-h3 video-reference mode cannot be combined with start/end-frame mode")
+	}
+	audioCount, audioDuration := countMinimaxH3AudioReferences(data)
+	if audioCount > 3 {
+		return fmt.Errorf("minimax-h3 supports at most 3 audio references")
+	}
+	if audioDuration > 15 {
+		return fmt.Errorf("minimax-h3 audio reference duration must not exceed 15 seconds in total")
+	}
+	if hasAudioReferenceInput(data) && (imageCount == 0 && videoCount == 0 || hasFrames) {
+		return fmt.Errorf("minimax-h3 audio_reference requires an image or video reference and cannot use start/end-frame mode")
 	}
 	return nil
+}
+
+func minimaxH3VideoReferenceInputs(data map[string]interface{}) []interface{} {
+	if data == nil {
+		return nil
+	}
+	for _, field := range []string{"video_reference", "video_reference_base"} {
+		if raw, ok := data[field].([]interface{}); ok {
+			return raw
+		}
+		if guidances, ok := data["guidances"].(map[string]interface{}); ok {
+			if raw, ok := guidances[field].([]interface{}); ok {
+				return raw
+			}
+		}
+	}
+	return nil
+}
+
+func countMinimaxH3VideoReferences(data map[string]interface{}) (int, float64) {
+	count := 0
+	duration := 0.0
+	if strings.TrimSpace(toString(data["video_url"])) != "" {
+		count++
+		if d := toFloat64(data["video_duration"]); d > 0 {
+			duration += d
+		}
+	}
+	for _, item := range minimaxH3VideoReferenceInputs(data) {
+		entry, _ := item.(map[string]interface{})
+		if video, ok := entry["video"].(map[string]interface{}); ok {
+			entry = video
+		}
+		if strings.TrimSpace(toString(entry["id"])) == "" && strings.TrimSpace(toString(entry["url"])) == "" {
+			continue
+		}
+		count++
+		duration += toFloat64(entry["duration"])
+	}
+	return count, duration
+}
+
+func minimaxH3VideoReferenceMissingDuration(data map[string]interface{}) bool {
+	for _, item := range minimaxH3VideoReferenceInputs(data) {
+		entry, _ := item.(map[string]interface{})
+		if video, ok := entry["video"].(map[string]interface{}); ok {
+			entry = video
+		}
+		if strings.TrimSpace(toString(entry["id"])) != "" && strings.TrimSpace(toString(entry["url"])) == "" && toFloat64(entry["duration"]) <= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func countMinimaxH3AudioReferences(data map[string]interface{}) (int, float64) {
+	count := 0
+	duration := 0.0
+	if strings.TrimSpace(toString(data["audio_url"])) != "" {
+		count++
+		duration += toFloat64(data["audio_duration"])
+	}
+	if raw, ok := audioReferenceInputs(data); ok {
+		for _, item := range raw {
+			entry, _ := item.(map[string]interface{})
+			if audio, ok := entry["audio"].(map[string]interface{}); ok {
+				entry = audio
+			}
+			if strings.TrimSpace(toString(entry["id"])) == "" && strings.TrimSpace(toString(entry["url"])) == "" {
+				continue
+			}
+			count++
+			duration += toFloat64(entry["duration"])
+		}
+	}
+	return count, duration
 }
 
 func hasUnsupportedKlingO3GuidanceInput(data map[string]interface{}) bool {
@@ -1443,7 +2301,7 @@ func leonardoVideoResolutionMode(modelID string, width int, height int) string {
 	return "RESOLUTION_720"
 }
 
-func (s *Server) submitLeonardoVideoGeneration(session *leonardo.TokenSession, usedTokenID string, tokenAttempt int, prompt string, modelID string, duration int, width int, height int, motionHasAudio bool, imageRefs []leonardo.ImageRef, startFrames []leonardo.FrameRef, endFrames []leonardo.FrameRef, videoRefs []leonardo.VideoRef, audioRefs []leonardo.AudioRef) (*videoGenerationSubmission, *videoGenerationAttemptFailure) {
+func (s *Server) submitLeonardoVideoGeneration(session *leonardo.TokenSession, usedTokenID string, tokenAttempt int, prompt string, modelID string, duration int, width int, height int, motionHasAudio bool, minimaxQuality, minimaxResolution string, imageRefs []leonardo.ImageRef, startFrames []leonardo.FrameRef, endFrames []leonardo.FrameRef, videoRefs []leonardo.VideoRef, audioRefs []leonardo.AudioRef) (*videoGenerationSubmission, *videoGenerationAttemptFailure) {
 	if s.LeonardoClient == nil {
 		return nil, &videoGenerationAttemptFailure{
 			StatusCode:      http.StatusInternalServerError,
@@ -1463,6 +2321,8 @@ func (s *Server) submitLeonardoVideoGeneration(session *leonardo.TokenSession, u
 			Width:          width,
 			Height:         height,
 			MotionHasAudio: motionHasAudio,
+			Quality:        minimaxQuality,
+			Resolution:     minimaxResolution,
 			ImageRefs:      imageRefs,
 			StartFrame:     startFrames,
 			EndFrame:       endFrames,
@@ -1810,9 +2670,12 @@ func (s *Server) resolveOpenAIVideoGuidanceInputs(data map[string]interface{}, s
 		videoRefs = append(videoRefs, videoRef)
 	}
 
-	if rawVideos, ok := data["video_reference"].([]interface{}); ok {
+	if rawVideos := minimaxH3VideoReferenceInputs(data); len(rawVideos) > 0 {
 		for idx, item := range rawVideos {
 			entry, _ := item.(map[string]interface{})
+			if video, ok := entry["video"].(map[string]interface{}); ok {
+				entry = video
+			}
 			rawID := toString(entry["id"])
 			rawURL := toString(entry["url"])
 			var durationHint float64
@@ -1901,7 +2764,7 @@ func hasUnsupportedSora2GuidanceInput(data map[string]interface{}) bool {
 			return true
 		}
 	}
-	arrayFields := []string{"image_urls", "image_guidance", "end_frame", "video_reference", "audio_reference"}
+	arrayFields := []string{"image_urls", "image_guidance", "end_frame", "video_reference", "video_reference_base", "audio_reference"}
 	for _, field := range arrayFields {
 		if rawItems, ok := data[field].([]interface{}); ok && len(rawItems) > 0 {
 			return true

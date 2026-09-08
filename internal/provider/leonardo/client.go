@@ -803,7 +803,35 @@ const generateMutation = `mutation Generate($request: CreateGenerationRequest!) 
   }
 }`
 
+const nanoBanana2LiteGenerateMutation = `mutation Generate($request: CreateGenerationRequest!) {
+  generate(request: $request) {
+    apiCreditCost
+    generationId
+    cost {
+      amount
+      unit
+      __typename
+    }
+    __typename
+  }
+}`
+
 const seedance25GenerateMutation = `mutation Generate($request: CreateGenerationRequest!) {
+  generate(request: $request) {
+    apiCreditCost
+    generationId
+    cost {
+      amount
+      unit
+      __typename
+    }
+    __typename
+  }
+}`
+
+// MiniMax H3 reports its charge in the nested Cost object (apiCreditCost is
+// null in the captured Leonardo responses), so request both fields.
+const minimaxH3GenerateMutation = `mutation Generate($request: CreateGenerationRequest!) {
   generate(request: $request) {
     apiCreditCost
     generationId
@@ -896,15 +924,24 @@ type GenerateRequest struct {
 
 // GenerateParams are the generation parameters.
 type GenerateParams struct {
-	Prompt         string     `json:"prompt"`
-	Mode           string     `json:"mode"`           // e.g. "RESOLUTION_720"
-	PromptEnhance  string     `json:"prompt_enhance"` // "OFF" or "ON"
+	Prompt        string `json:"prompt"`
+	Mode          string `json:"mode"`           // e.g. "RESOLUTION_720"
+	PromptEnhance string `json:"prompt_enhance"` // "OFF" or "ON"
+	// Quality selects Leonardo's queue speed for models that expose it. Hailuo
+	// 03 (MiniMax H3) accepts STANDARD or ACCELERATED; other models leave it
+	// empty and retain their existing behaviour.
+	Quality string `json:"quality,omitempty"`
+	// Resolution is the Hailuo 03 tier used when width/height are automatic
+	// (480p, 768p, 2k, or 4k). It is retained alongside explicit dimensions so
+	// the request mirrors Leonardo's web client payload.
+	Resolution     string     `json:"resolution,omitempty"`
 	Quantity       int        `json:"quantity"`
 	Duration       int        `json:"duration"` // 4-15 seconds
 	MotionHasAudio bool       `json:"motion_has_audio"`
 	Width          int        `json:"width"`
 	Height         int        `json:"height"`
 	Seed           int        `json:"seed"`                  // -1 for random
+	StyleIDs       []string   `json:"style_ids,omitempty"`   // image model style UUIDs
 	ImageRefs      []ImageRef `json:"image_refs,omitempty"`  // multi-image reference guidance
 	StartFrame     []FrameRef `json:"start_frame,omitempty"` // start frame (first frame)
 	EndFrame       []FrameRef `json:"end_frame,omitempty"`   // end frame (last frame)
@@ -978,10 +1015,21 @@ func isKlingO3Model(modelID string) bool {
 
 func isMinimaxH3Model(modelID string) bool {
 	switch strings.TrimSpace(modelID) {
-	case "hailuo-03", "minimax-h3":
+	case "hailuo-03", "minimax-h3", "minimax-h3-standard", "minimax-h3-accelerated", "minimax-h3-fast":
 		return true
 	default:
 		return false
+	}
+}
+
+func minimaxH3QualityFromModelID(modelID string) string {
+	switch strings.ToLower(strings.TrimSpace(modelID)) {
+	case "minimax-h3-accelerated", "minimax-h3-fast":
+		return "ACCELERATED"
+	case "minimax-h3-standard":
+		return "STANDARD"
+	default:
+		return ""
 	}
 }
 
@@ -1003,7 +1051,36 @@ func isSeedance25Model(modelID string) bool {
 	}
 }
 
+func isNanoBanana2LiteModel(modelID string) bool {
+	switch strings.ToLower(strings.TrimSpace(modelID)) {
+	case "nano-banana-2-lite", "nano_banana_2_lite", "nano-banana-lite-2", "gemini-flash-lite-3.1":
+		return true
+	default:
+		return false
+	}
+}
+
+func isAllowedNanoBanana2LiteSize(width, height int) bool {
+	switch {
+	case width == 1024 && height == 1024:
+	case width == 848 && height == 1264:
+	case width == 1376 && height == 768:
+	case width == 1264 && height == 848:
+	case width == 896 && height == 1200:
+	case width == 1152 && height == 928:
+	case width == 1584 && height == 672:
+	case width == 1200 && height == 896:
+	case width == 768 && height == 1376:
+	default:
+		return false
+	}
+	return true
+}
+
 func seedanceUpstreamModel(modelID string) string {
+	if isMinimaxH3Model(modelID) {
+		return "hailuo-03"
+	}
 	if isSeedance25Model(modelID) {
 		return "bytedance/seedance-2.5"
 	}
@@ -1037,12 +1114,74 @@ func isAllowedSora2Size(width int, height int) bool {
 }
 
 func isAllowedMinimaxH3Size(width int, height int) bool {
-	return (width == 2560 && height == 1440) ||
+	return (width == 1120 && height == 480) ||
+		(width == 856 && height == 480) ||
+		(width == 640 && height == 480) ||
+		(width == 480 && height == 480) ||
+		(width == 480 && height == 640) ||
+		(width == 480 && height == 856) ||
+		(width == 1792 && height == 768) ||
+		(width == 1376 && height == 768) ||
+		(width == 1024 && height == 768) ||
+		(width == 768 && height == 768) ||
+		(width == 768 && height == 1024) ||
+		(width == 768 && height == 1376) ||
+		(width == 2560 && height == 1440) ||
 		(width == 1440 && height == 2560) ||
 		(width == 1440 && height == 1440) ||
 		(width == 1920 && height == 1440) ||
 		(width == 1440 && height == 1920) ||
-		(width == 3360 && height == 1440)
+		(width == 3360 && height == 1440) ||
+		(width == 5040 && height == 2160) ||
+		(width == 3840 && height == 2160) ||
+		(width == 2880 && height == 2160) ||
+		(width == 2160 && height == 2160) ||
+		(width == 2160 && height == 2880) ||
+		(width == 2160 && height == 3840) ||
+		(width == 0 && height == 0)
+}
+
+func minimaxH3SizeForResolution(resolution string) (int, int, bool) {
+	switch strings.ToLower(strings.TrimSpace(resolution)) {
+	case "480p":
+		return 1120, 480, true
+	case "768p":
+		return 1376, 768, true
+	case "2k":
+		return 2560, 1440, true
+	case "4k":
+		return 3840, 2160, true
+	default:
+		return 0, 0, false
+	}
+}
+
+func minimaxH3ResolutionForSize(width, height int) string {
+	switch {
+	case width == 1120 || width == 856 || width == 640 || width == 480 && height <= 856:
+		return "480p"
+	case width == 1792 || width == 1376 || width == 1024 || width == 768 && height <= 1376:
+		return "768p"
+	case width == 3360 || width == 2560 || width == 1920 || width == 1440 && height <= 2560:
+		return "2k"
+	case width == 5040 || width == 3840 || width == 2880 || width == 2160:
+		return "4k"
+	default:
+		return ""
+	}
+}
+
+func isAllowedMinimaxH3Resolution(resolution string) bool {
+	switch strings.ToLower(strings.TrimSpace(resolution)) {
+	case "480p", "768p", "2k", "4k":
+		return true
+	default:
+		return false
+	}
+}
+
+func minimaxH3ResolutionIsHigh(resolution string) bool {
+	return strings.EqualFold(strings.TrimSpace(resolution), "2k") || strings.EqualFold(strings.TrimSpace(resolution), "4k")
 }
 
 func isAllowedKlingO3Duration(duration int) bool {
@@ -1131,15 +1270,36 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 	if strings.EqualFold(genReq.Model, "kling-o3") || strings.EqualFold(genReq.Model, "ko3") {
 		genReq.Model = "kling-video-o-3"
 	}
-	if strings.EqualFold(genReq.Model, "minimax-h3") {
+	if isMinimaxH3Model(genReq.Model) {
+		if aliasQuality := minimaxH3QualityFromModelID(genReq.Model); aliasQuality != "" && strings.TrimSpace(genReq.Params.Quality) == "" {
+			genReq.Params.Quality = aliasQuality
+		}
 		genReq.Model = "hailuo-03"
 	}
 	if isSeedance25Model(genReq.Model) {
 		genReq.Model = "seedance-2.5"
 	}
+	if isNanoBanana2LiteModel(genReq.Model) {
+		genReq.Model = "nano-banana-2-lite"
+	}
+	if isMinimaxH3Model(genReq.Model) && genReq.Params.Width == 0 && genReq.Params.Height == 0 {
+		if strings.TrimSpace(genReq.Params.Resolution) == "" {
+			if strings.EqualFold(strings.TrimSpace(genReq.Params.Quality), "ACCELERATED") {
+				genReq.Params.Resolution = "768p"
+			} else {
+				genReq.Params.Resolution = "2k"
+			}
+		}
+		if width, height, ok := minimaxH3SizeForResolution(genReq.Params.Resolution); ok {
+			genReq.Params.Width, genReq.Params.Height = width, height
+		}
+	}
+	isNanoBanana := isNanoBanana2LiteModel(genReq.Model)
 	isKlingO3VideoRefMode := isKlingO3Model(genReq.Model) && len(genReq.Params.VideoRefs) > 0
 	if genReq.Params.Width == 0 {
-		if isKlingO3VideoRefMode {
+		if isNanoBanana {
+			genReq.Params.Width = 1024
+		} else if isKlingO3VideoRefMode {
 			genReq.Params.Width = 0
 		} else if isKlingO3Model(genReq.Model) {
 			genReq.Params.Width = 1080
@@ -1154,7 +1314,9 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 		}
 	}
 	if genReq.Params.Height == 0 {
-		if isKlingO3VideoRefMode {
+		if isNanoBanana {
+			genReq.Params.Height = 1024
+		} else if isKlingO3VideoRefMode {
 			genReq.Params.Height = 0
 		} else if isKlingO3Model(genReq.Model) {
 			genReq.Params.Height = 1920
@@ -1169,7 +1331,7 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 		}
 	}
 	// Set defaults
-	if genReq.Params.Mode == "" {
+	if genReq.Params.Mode == "" && !isNanoBanana {
 		genReq.Params.Mode = inferResolutionModeForModel(genReq.Model, genReq.Params.Width, genReq.Params.Height)
 	}
 	if genReq.Params.Quantity == 0 {
@@ -1191,11 +1353,25 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 	if genReq.Params.Duration == 0 && isSeedance25Model(genReq.Model) {
 		genReq.Params.Duration = 4
 	}
-	if genReq.Params.Duration == 0 {
+	if genReq.Params.Duration == 0 && !isNanoBanana {
 		genReq.Params.Duration = 4
 	}
-	if genReq.Params.Seed == 0 {
+	if genReq.Params.Seed == 0 && !isNanoBanana {
 		genReq.Params.Seed = -1
+	}
+	if isNanoBanana {
+		if genReq.Params.PromptEnhance == "" {
+			genReq.Params.PromptEnhance = "OFF"
+		}
+		if len(genReq.Params.StyleIDs) == 0 {
+			genReq.Params.StyleIDs = []string{"111dc692-d470-4eec-b791-3475abac4c46"}
+		}
+		if !isAllowedNanoBanana2LiteSize(genReq.Params.Width, genReq.Params.Height) {
+			return nil, fmt.Errorf("nano-banana-2-lite size is unsupported")
+		}
+		if genReq.Params.Quantity != 1 {
+			return nil, fmt.Errorf("nano-banana-2-lite supports quantity 1")
+		}
 	}
 	if isSora2Model(genReq.Model) {
 		if !isAllowedSora2Duration(genReq.Params.Duration) {
@@ -1226,14 +1402,41 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 		}
 	}
 	if isMinimaxH3Model(genReq.Model) {
+		// MiniMax H3 always emits native audio; disable_audio is not an upstream
+		// option for this model.
+		genReq.Params.MotionHasAudio = true
+		quality := strings.ToUpper(strings.TrimSpace(genReq.Params.Quality))
+		if quality == "" {
+			// Keep the historical Leo2API default (2K standard) while allowing
+			// callers to opt into Leonardo's faster accelerated queue explicitly.
+			quality = "STANDARD"
+		}
+		if quality != "STANDARD" && quality != "ACCELERATED" {
+			return nil, fmt.Errorf("minimax-h3 quality must be STANDARD or ACCELERATED")
+		}
+		genReq.Params.Quality = quality
+		resolution := strings.ToLower(strings.TrimSpace(genReq.Params.Resolution))
+		if resolution == "" {
+			resolution = minimaxH3ResolutionForSize(genReq.Params.Width, genReq.Params.Height)
+			if resolution == "" {
+				resolution = "768p"
+			}
+		}
+		if !isAllowedMinimaxH3Resolution(resolution) {
+			return nil, fmt.Errorf("minimax-h3 resolution must be 480p, 768p, 2k, or 4k")
+		}
+		if inferred := minimaxH3ResolutionForSize(genReq.Params.Width, genReq.Params.Height); inferred != "" {
+			resolution = inferred
+		}
+		genReq.Params.Resolution = resolution
 		if genReq.Params.Duration < 5 || genReq.Params.Duration > 15 {
 			return nil, fmt.Errorf("minimax-h3 duration must be between 5 and 15 seconds")
 		}
 		if !isAllowedMinimaxH3Size(genReq.Params.Width, genReq.Params.Height) {
-			return nil, fmt.Errorf("minimax-h3 size must be one of 2560x1440, 1440x2560, 1440x1440, 1920x1440, 1440x1920, or 3360x1440")
+			return nil, fmt.Errorf("minimax-h3 size is unsupported; use a supported 480p, 768p, 2k, or 4k dimension")
 		}
-		if len(genReq.Params.ImageRefs) > 5 {
-			return nil, fmt.Errorf("minimax-h3 supports at most 5 image references")
+		if len(genReq.Params.ImageRefs) > 9 {
+			return nil, fmt.Errorf("minimax-h3 supports at most 9 image references")
 		}
 		if len(genReq.Params.StartFrame) > 1 || len(genReq.Params.EndFrame) > 1 {
 			return nil, fmt.Errorf("minimax-h3 supports at most one start frame and one end frame")
@@ -1242,11 +1445,42 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 		if hasFrames && len(genReq.Params.ImageRefs) > 0 {
 			return nil, fmt.Errorf("minimax-h3 image-reference mode cannot be combined with start/end-frame mode")
 		}
-		if len(genReq.Params.VideoRefs) > 0 {
-			return nil, fmt.Errorf("minimax-h3 does not support video_reference")
+		if len(genReq.Params.VideoRefs) > 3 {
+			return nil, fmt.Errorf("minimax-h3 supports at most 3 video references")
 		}
-		if len(genReq.Params.AudioRefs) > 0 && (len(genReq.Params.ImageRefs) == 0 || hasFrames) {
-			return nil, fmt.Errorf("minimax-h3 audio_reference is only supported in image-reference mode")
+		if hasFrames && len(genReq.Params.VideoRefs) > 0 {
+			return nil, fmt.Errorf("minimax-h3 video-reference mode cannot be combined with start/end-frame mode")
+		}
+		if len(genReq.Params.AudioRefs) > 3 {
+			return nil, fmt.Errorf("minimax-h3 supports at most 3 audio references")
+		}
+		if len(genReq.Params.AudioRefs) > 0 && len(genReq.Params.ImageRefs) == 0 && len(genReq.Params.VideoRefs) == 0 {
+			return nil, fmt.Errorf("minimax-h3 audio_reference requires an image or video reference")
+		}
+		if len(genReq.Params.AudioRefs) > 0 && hasFrames {
+			return nil, fmt.Errorf("minimax-h3 audio_reference cannot be combined with start/end-frame mode")
+		}
+		videoDuration := 0.0
+		for _, ref := range genReq.Params.VideoRefs {
+			if ref.Duration <= 0 {
+				return nil, fmt.Errorf("minimax-h3 video references require a duration")
+			}
+			videoDuration += ref.Duration
+		}
+		audioDuration := 0.0
+		for _, ref := range genReq.Params.AudioRefs {
+			if ref.Duration > 0 {
+				audioDuration += ref.Duration
+			}
+		}
+		if videoDuration > 15 {
+			return nil, fmt.Errorf("minimax-h3 video reference duration must not exceed 15 seconds in total")
+		}
+		if audioDuration > 15 {
+			return nil, fmt.Errorf("minimax-h3 audio reference duration must not exceed 15 seconds in total")
+		}
+		if quality == "ACCELERATED" && minimaxH3ResolutionIsHigh(resolution) {
+			return nil, fmt.Errorf("minimax-h3 accelerated quality supports 480p and 768p only")
 		}
 	}
 	if isSeedance480pModel(genReq.Model) {
@@ -1264,7 +1498,16 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 	}
 
 	params := map[string]interface{}{}
-	if isSora2Model(genReq.Model) {
+	if isNanoBanana {
+		params = map[string]interface{}{
+			"height":         genReq.Params.Height,
+			"width":          genReq.Params.Width,
+			"prompt_enhance": strings.TrimSpace(genReq.Params.PromptEnhance),
+			"quantity":       genReq.Params.Quantity,
+			"style_ids":      genReq.Params.StyleIDs,
+			"prompt":         genReq.Params.Prompt,
+		}
+	} else if isSora2Model(genReq.Model) {
 		params = map[string]interface{}{
 			"height":   genReq.Params.Height,
 			"width":    genReq.Params.Width,
@@ -1278,8 +1521,10 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 			"height":           genReq.Params.Height,
 			"width":            genReq.Params.Width,
 			"duration":         genReq.Params.Duration,
+			"quality":          genReq.Params.Quality,
 			"quantity":         genReq.Params.Quantity,
 			"prompt":           genReq.Params.Prompt,
+			"resolution":       genReq.Params.Resolution,
 			"motion_has_audio": genReq.Params.MotionHasAudio,
 		}
 	} else if isKlingO3Model(genReq.Model) {
@@ -1355,13 +1600,16 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 				if strength == "" {
 					strength = "MID"
 				}
-				refs = append(refs, map[string]interface{}{
+				refPayload := map[string]interface{}{
 					"image": map[string]interface{}{
 						"id":   ref.ID,
 						"type": imgType,
 					},
-					"strength": strength,
-				})
+				}
+				if !isNanoBanana {
+					refPayload["strength"] = strength
+				}
+				refs = append(refs, refPayload)
 			}
 			guidances["image_reference"] = refs
 			log.Printf("[Leonardo] Including %d image references in generation", len(refs))
@@ -1456,8 +1704,14 @@ func (c *Client) Generate(session *TokenSession, genReq *GenerateRequest) (*Gene
 
 	requestModel := seedanceUpstreamModel(genReq.Model)
 	query := generateMutation
+	if isNanoBanana {
+		query = nanoBanana2LiteGenerateMutation
+	}
 	if isSeedance25Model(genReq.Model) {
 		query = seedance25GenerateMutation
+	}
+	if isMinimaxH3Model(genReq.Model) {
+		query = minimaxH3GenerateMutation
 	}
 	gqlReq := graphqlRequest{
 		OperationName: "Generate",

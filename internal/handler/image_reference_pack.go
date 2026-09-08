@@ -21,6 +21,8 @@ const (
 	// sending an oversized guidance array upstream.
 	providerImageReferenceLimit = 4
 	maxPublicImageReferences    = 9
+	maxPublicVideoReferences    = 3
+	maxPublicAudioReferences    = 3
 	packedImageGroupSize        = 3
 	packedImageTileSize         = 512
 )
@@ -30,12 +32,115 @@ type imageReferenceSource struct {
 	Strength string
 }
 
+// validateSeedanceReferenceCounts enforces the public compatibility contract
+// before any remote media is downloaded or uploaded.
+func validateSeedanceReferenceCounts(data map[string]interface{}) error {
+	if imageCount := len(collectImageReferenceSources(data)); imageCount > maxPublicImageReferences {
+		return fmt.Errorf("at most %d image references are supported", maxPublicImageReferences)
+	}
+	if videoCount := countReferenceInputs(data, "video_url", "video_reference"); videoCount > maxPublicVideoReferences {
+		return fmt.Errorf("at most %d video references are supported", maxPublicVideoReferences)
+	}
+	if audioCount := countAudioReferenceInputs(data); audioCount > maxPublicAudioReferences {
+		return fmt.Errorf("at most %d audio references are supported", maxPublicAudioReferences)
+	}
+	return validateAudioReferenceDurations(data)
+}
+
+func countReferenceInputs(data map[string]interface{}, singleField, arrayField string) int {
+	if data == nil {
+		return 0
+	}
+	count := 0
+	if strings.TrimSpace(toString(data[singleField])) != "" {
+		count++
+	}
+	if rawItems, ok := data[arrayField].([]interface{}); ok {
+		for _, item := range rawItems {
+			entry, _ := item.(map[string]interface{})
+			if strings.TrimSpace(toString(entry["id"])) != "" || strings.TrimSpace(toString(entry["url"])) != "" {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func countAudioReferenceInputs(data map[string]interface{}) int {
+	if data == nil {
+		return 0
+	}
+	count := 0
+	if strings.TrimSpace(toString(data["audio_url"])) != "" {
+		count++
+	}
+	if rawItems, ok := audioReferenceInputs(data); ok {
+		for _, item := range rawItems {
+			entry, _ := item.(map[string]interface{})
+			if audio, ok := entry["audio"].(map[string]interface{}); ok {
+				entry = audio
+			}
+			if strings.TrimSpace(toString(entry["id"])) != "" || strings.TrimSpace(toString(entry["url"])) != "" {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+const (
+	minSeedanceAudioReferenceDuration = 1.0
+	maxSeedanceAudioReferenceDuration = 15.0
+)
+
+func validateAudioReferenceDurations(data map[string]interface{}) error {
+	check := func(raw interface{}) error {
+		entry, _ := raw.(map[string]interface{})
+		if audio, ok := entry["audio"].(map[string]interface{}); ok {
+			entry = audio
+		}
+		return validateUploadedSeedanceAudioDuration(toFloat64(entry["duration"]))
+	}
+	if data == nil {
+		return nil
+	}
+	if rawAudio, ok := data["audio_reference"].([]interface{}); ok {
+		for _, item := range rawAudio {
+			if err := check(item); err != nil {
+				return err
+			}
+		}
+	} else if guidances, ok := data["guidances"].(map[string]interface{}); ok {
+		if rawAudio, ok := guidances["audio_reference"].([]interface{}); ok {
+			for _, item := range rawAudio {
+				if err := check(item); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func validateUploadedSeedanceAudioDuration(duration float64) error {
+	if duration <= 0 {
+		return nil
+	}
+	if duration < minSeedanceAudioReferenceDuration {
+		return fmt.Errorf("audio reference duration must be at least %.0f second", minSeedanceAudioReferenceDuration)
+	}
+	if duration > maxSeedanceAudioReferenceDuration {
+		return fmt.Errorf("audio reference duration must be at most %.0f seconds", maxSeedanceAudioReferenceDuration)
+	}
+	return nil
+}
+
 // maybePackOpenAIImageReferences converts 5-9 URL references into a small
 // number of contact-sheet references. It returns the original map when no
 // packing is needed. A cloned map is used so request validation/debug logging
 // still sees the caller's original payload.
 func (s *Server) maybePackOpenAIImageReferences(data map[string]interface{}, session *leonardo.TokenSession, modelID string) (map[string]interface{}, error) {
-	if data == nil || session == nil || isSora2ModelID(modelID) {
+	if data == nil || session == nil || isSora2ModelID(modelID) || isMinimaxH3ModelID(modelID) {
 		return data, nil
 	}
 

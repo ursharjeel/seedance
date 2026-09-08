@@ -121,6 +121,8 @@ curl -X POST http://127.0.0.1:8787/v1/video/generations \
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `GET` | `/v1/models` | 查询支持的模型 |
+| `POST` | `/v1/images/generations` | 提交 Nano Banana 2 Lite 图像生成任务 |
+| `GET` | `/v1/images/generations/{generation_id}` | 查询图像任务状态和结果 |
 | `POST` | `/v1/video/generations` | 提交视频生成任务 |
 | `GET` | `/v1/video/generations/{generation_id}` | 查询任务状态和结果 |
 | `POST` | `/v1/video/async-generations` | 提交任务的兼容别名 |
@@ -141,6 +143,17 @@ curl http://127.0.0.1:8787/v1/models \
 
 ## 模型与能力
 
+### Nano Banana 2 Lite 图像生成
+
+`nano-banana-2-lite` 是默认图像模型，也接受 `nano_banana_2_lite` 别名。提交接口返回 `202 Accepted` 和 `poll_url`，完成后在查询接口的 `data[0].url` 中返回图像地址。支持 `1024x1024`、`848x1264`、`1376x768` 等 Nano Banana 2 Lite 分辨率，以及最多 6 张 `image_url`/`image_urls`/`image_guidance` 参考图。
+
+```bash
+curl -X POST http://127.0.0.1:8787/v1/images/generations \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"nano-banana-2-lite","prompt":"A galaxy tree in the middle of the world","size":"1024x1024"}'
+```
+
 ### 模型总览
 
 | 推荐模型名 | 上游模型 | 默认时长 | 默认尺寸 | 支持时长 | 参考能力 |
@@ -154,7 +167,7 @@ curl http://127.0.0.1:8787/v1/models \
 | `video-2.0-mini-480p` | `seedance-2.0-mini` | 10 秒 | `864x496` | 4–15 秒 | 图片、首尾帧、视频、音频 |
 | `sora2` | `sora-2` | 8 秒 | `720x1280` | 4、8、12 秒 | 文生视频、单首帧 |
 | `ko3` | `kling-video-o-3` | 3 秒 | `1080x1920` | 3–15 秒 | 图片、首尾帧、视频 |
-| `minimax-h3` | `hailuo-03` | 5 秒 | `2560x1440` | 5–15 秒 | 图片、首尾帧、图片加音频 |
+| `minimax-h3` | `hailuo-03` | 5 秒 | `2560x1440` | 5–15 秒 | 图片、视频、首尾帧、图片/视频加音频；STANDARD / ACCELERATED |
 
 `size` 的格式统一为 `宽x高`。
 
@@ -211,7 +224,7 @@ MiniMax H3 的公共 API 请求、响应和请求日志统一使用 `minimax-h3`
 
 #### MiniMax H3
 
-MiniMax H3 默认使用 2K。`size` 和 Leonardo 上游参数均按输出视频的“宽x高”填写：
+MiniMax H3 默认使用 2K 标准质量。`quality` 可设为 `STANDARD` 或 `ACCELERATED`；Accelerated 仅支持 480p/768p。`size` 和 Leonardo 上游参数均按输出视频的“宽x高”填写：
 
 | `aspect_ratio` | `size` | 上游参数 |
 | --- | --- | --- |
@@ -222,18 +235,20 @@ MiniMax H3 默认使用 2K。`size` 和 Leonardo 上游参数均按输出视频�
 | `3:4` | `1440x1920` | `width=1440, height=1920` |
 | `21:9` | `3360x1440` | `width=3360, height=1440` |
 
+也支持 `resolution=480p|768p|2k|4k`（未提供 `size` 时服务会选择该档位的 16:9 尺寸）。480p 尺寸为 `1120x480`、`856x480`、`640x480`、`480x480`、`480x640`、`480x856`；768p 尺寸为 `1792x768`、`1376x768`、`1024x768`、`768x768`、`768x1024`、`768x1376`；4K 尺寸为 `5040x2160`、`3840x2160`、`2880x2160`、`2160x2160`、`2160x2880`、`2160x3840`。
+
 ### MiniMax H3 模式规则
 
 - 不传图片时为文生视频。
 - `image_url`、`image_urls` 或 `image_guidance` 均为图片参考模式。
 - 即使只上传一张图片，也使用图片参考模式，不会自动当作首帧。
-- 图片参考最多 9 张，默认 `strength=MID`。当输入超过 Leonardo 部署的 4 个独立参考图上限时，Leo2API 会把 URL 图片按每组 3 张拼接为最多 3 个合成参考图后再上传；ID-only 图片无法执行该兼容转换。
+- 图片参考最多 9 张，默认 `strength=MID`；视频参考最多 3 个，音频参考最多 3 个，每类参考的总时长不超过 15 秒。
 - 只有明确传入 `start_image_url`、`start_frame`、`end_image_url` 或 `end_frame` 时才进入首尾帧模式。
 - 图片参考模式与首尾帧模式不能混用。
-- 音频参考必须和至少一张图片参考一起使用。
+- 音频参考必须和至少一张图片或视频参考一起使用。
 - 首尾帧模式不支持音频参考。
-- 不支持视频参考。
-- 上游请求固定使用 `model=hailuo-03`、`quantity=1`、`motion_has_audio=true`，不发送 `mode`、`seed` 或 `prompt_enhance`。
+- 视频参考可以单独使用，也可以和图片参考混合使用；视频参考不能和首尾帧混用。
+- 上游请求固定使用 `model=hailuo-03`、`quantity=1`、`motion_has_audio=true`，并发送 `quality=STANDARD|ACCELERATED` 和 `resolution=480p|768p|2k|4k`；不发送 `mode`、`seed` 或 `prompt_enhance`。
 
 ### Token 积分门槛
 
@@ -267,6 +282,8 @@ MiniMax H3 默认使用 2K。`size` 和 Leonardo 上游参数均按输出视频�
 | `aspect_ratio` | string | 否 | 按模型映射为输出尺寸 |
 | `width` | integer | 否 | 显式输出宽度 |
 | `height` | integer | 否 | 显式输出高度 |
+| `quality` | string | 否 | MiniMax H3 速度：`STANDARD` 或 `ACCELERATED` |
+| `resolution` | string | 否 | MiniMax H3 档位：`480p`、`768p`、`2k` 或 `4k` |
 | `async` | boolean | 否 | 兼容字段；接口始终异步提交 |
 | `disable_audio` | boolean | 否 | 设为 `true` 时向 Leonardo 发送 `motion_has_audio=false`；默认保留音频 |
 
@@ -299,6 +316,7 @@ MiniMax H3 默认使用 2K。`size` 和 Leonardo 上游参数均按输出视频�
 | --- | --- |
 | `video_url` | 单个远程 MP4 |
 | `video_reference` | 视频对象数组，可传 `url`、`duration` |
+| `video_reference_base` | Leonardo 兼容字段；格式同 `video_reference` |
 
 顶层 `duration` 是生成结果时长，`video_reference[].duration` 是参考视频本身的时长。
 
@@ -312,6 +330,8 @@ MiniMax H3 默认使用 2K。`size` 和 Leonardo 上游参数均按输出视频�
 | `audio_reference` | 音频对象数组，可传 `url`、`duration` |
 
 远程或浏览器内联音频支持 `mp3`、`wav`、`m4a`、`aac`、`ogg`、`webm`。`data:audio/...;base64,...` 会先解码，再上传音频、等待素材就绪，并尽量读取参考音频时长。
+
+MiniMax H3 的 `video_reference` 最多 3 个、`audio_reference` 最多 3 个；每类参考的总时长不能超过 15 秒。H3 视频参考对象需要提供 `duration`（远程 URL 可由服务自动探测）。
 
 ## 调用示例
 
@@ -404,6 +424,23 @@ POST /v1/video/generations
   "audio_url": "https://example.com/adventure.mp3"
 }
 ```
+
+### MiniMax H3 图片、视频和音频参考
+
+```json
+{
+  "model": "minimax-h3",
+  "prompt": "让参考素材中的角色在同一场景中互动",
+  "duration": 15,
+  "quality": "STANDARD",
+  "resolution": "768p",
+  "image_urls": ["https://example.com/character.png"],
+  "video_reference": [{"url": "https://example.com/motion.mp4", "duration": 5}],
+  "audio_reference": [{"url": "https://example.com/music.mp3", "duration": 5}]
+}
+```
+
+将 `quality` 改为 `ACCELERATED` 可使用更快的队列；Accelerated 不支持 2K/4K。
 
 ### 视频参考
 

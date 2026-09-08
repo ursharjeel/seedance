@@ -117,6 +117,56 @@ func TestGenerateBuildsSora2TextToVideoPayload(t *testing.T) {
 	}
 }
 
+func TestGenerateBuildsNanoBanana2LitePayload(t *testing.T) {
+	var requestBody string
+	client := NewClient("")
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		requestBody = string(body)
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"data":{"generate":{"apiCreditCost":30,"generationId":"gen-nano-lite","cost":{"amount":"30","unit":"API_CREDITS"}}}}`))}, nil
+	})}
+	session := &TokenSession{JWT: "jwt", JWTExpiry: time.Now().Add(time.Hour)}
+	refs := []ImageRef{{ID: "img-1", Type: "UPLOADED"}, {ID: "img-2", Type: "UPLOADED"}}
+	result, err := client.Generate(session, &GenerateRequest{Model: "nano_banana_2_lite", Public: true, Params: GenerateParams{
+		Prompt: "a galaxy tree", Width: 848, Height: 1264, Quantity: 1, ImageRefs: refs,
+	}})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if result.GenerationID != "gen-nano-lite" || result.APICreditCost != 30 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	payload := mustJSONMap(t, requestBody)
+	if payload["operationName"] != "Generate" {
+		t.Fatalf("operationName = %v, want Generate", payload["operationName"])
+	}
+	request := payload["variables"].(map[string]interface{})["request"].(map[string]interface{})
+	if request["model"] != "nano-banana-2-lite" || request["public"] != true {
+		t.Fatalf("unexpected request envelope: %+v", request)
+	}
+	params := request["parameters"].(map[string]interface{})
+	if params["height"] != float64(1264) || params["width"] != float64(848) || params["prompt_enhance"] != "OFF" || params["quantity"] != float64(1) || params["prompt"] != "a galaxy tree" {
+		t.Fatalf("unexpected params: %+v", params)
+	}
+	styles := params["style_ids"].([]interface{})
+	if len(styles) != 1 || styles[0] != "111dc692-d470-4eec-b791-3475abac4c46" {
+		t.Fatalf("style_ids = %v, want captured default style", styles)
+	}
+	guidances := params["guidances"].(map[string]interface{})["image_reference"].([]interface{})
+	if len(guidances) != 2 {
+		t.Fatalf("image_reference length = %d, want 2", len(guidances))
+	}
+	for _, raw := range guidances {
+		entry := raw.(map[string]interface{})
+		if _, exists := entry["strength"]; exists {
+			t.Fatalf("nano image reference unexpectedly contains strength: %v", entry)
+		}
+	}
+}
+
 func TestGenerateBuildsSora2ImageToVideoPayload(t *testing.T) {
 	var requestBody string
 	client := NewClient("")
@@ -739,6 +789,111 @@ func TestGenerateBuildsMinimaxH3Payloads(t *testing.T) {
 			}
 			if _, ok := guidances["audio_reference"]; ok != tt.wantAudio {
 				t.Fatalf("audio_reference present = %v, want %v", ok, tt.wantAudio)
+			}
+		})
+	}
+}
+
+func TestGenerateBuildsMinimaxH3CapturedMultimodalPayload(t *testing.T) {
+	imageRefs := []ImageRef{
+		{ID: "image-1", Type: "UPLOADED"},
+		{ID: "image-2", Type: "UPLOADED"},
+		{ID: "image-3", Type: "UPLOADED"},
+		{ID: "image-4", Type: "UPLOADED"},
+		{ID: "image-5", Type: "UPLOADED"},
+		{ID: "image-6", Type: "UPLOADED"},
+	}
+	videoRefs := []VideoRef{
+		{ID: "video-1", Type: "UPLOADED", Duration: 5},
+		{ID: "video-2", Type: "UPLOADED", Duration: 5},
+	}
+	audioRefs := []AudioRef{
+		{ID: "audio-1", Type: "UPLOADED", Duration: 2.616},
+		{ID: "audio-2", Type: "UPLOADED", Duration: 6.024},
+	}
+
+	for _, tt := range []struct {
+		name    string
+		model   string
+		quality string
+	}{
+		{name: "standard capture", model: "minimax-h3", quality: "STANDARD"},
+		{name: "accelerated alias", model: "minimax-h3-accelerated", quality: "ACCELERATED"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var requestBody string
+			client := NewClient("")
+			client.httpClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				body, err := io.ReadAll(req.Body)
+				if err != nil {
+					t.Fatalf("read request body: %v", err)
+				}
+				requestBody = string(body)
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader(`{"data":{"generate":{"apiCreditCost":null,"generationId":"gen-h3-captured","cost":{"amount":"2850","unit":"CREDITS"}}}}`)),
+				}, nil
+			})}
+			session := &TokenSession{JWT: "jwt", JWTExpiry: time.Now().Add(time.Hour)}
+
+			result, err := client.Generate(session, &GenerateRequest{
+				Model:  tt.model,
+				Public: true,
+				Params: GenerateParams{
+					Prompt:     "generate galaxy tree in middle of world",
+					Duration:   15,
+					Quality:    tt.quality,
+					Resolution: "768p",
+					Width:      768,
+					Height:     1376,
+					Quantity:   1,
+					ImageRefs:  imageRefs,
+					VideoRefs:  videoRefs,
+					AudioRefs:  audioRefs,
+				},
+			})
+			if err != nil {
+				t.Fatalf("Generate returned error: %v", err)
+			}
+			if result.GenerationID != "gen-h3-captured" || result.APICreditCost != 2850 || result.CostAmount != "2850" || result.CostUnit != "CREDITS" {
+				t.Fatalf("unexpected result: %+v", result)
+			}
+
+			payload := mustJSONMap(t, requestBody)
+			if !strings.Contains(payload["query"].(string), "cost {") {
+				t.Fatalf("H3 query did not request nested cost: %s", payload["query"])
+			}
+			request := payload["variables"].(map[string]interface{})["request"].(map[string]interface{})
+			if request["model"] != "hailuo-03" || request["public"] != true {
+				t.Fatalf("unexpected request envelope: %+v", request)
+			}
+			params := request["parameters"].(map[string]interface{})
+			for key, want := range map[string]interface{}{
+				"height":           float64(1376),
+				"width":            float64(768),
+				"duration":         float64(15),
+				"quality":          tt.quality,
+				"resolution":       "768p",
+				"quantity":         float64(1),
+				"motion_has_audio": true,
+			} {
+				if params[key] != want {
+					t.Fatalf("parameters[%s] = %v, want %v", key, params[key], want)
+				}
+			}
+			if _, ok := params["mode"]; ok {
+				t.Fatalf("H3 parameters unexpectedly contains mode: %v", params["mode"])
+			}
+			guidances := params["guidances"].(map[string]interface{})
+			if got := len(guidances["image_reference"].([]interface{})); got != 6 {
+				t.Fatalf("image_reference length = %d, want 6", got)
+			}
+			if got := len(guidances["video_reference_base"].([]interface{})); got != 2 {
+				t.Fatalf("video_reference_base length = %d, want 2", got)
+			}
+			if got := len(guidances["audio_reference"].([]interface{})); got != 2 {
+				t.Fatalf("audio_reference length = %d, want 2", got)
 			}
 		})
 	}
