@@ -15,6 +15,7 @@ import (
 	"leo2api/internal/provider/leonardo"
 	"leo2api/internal/reqlog"
 	"leo2api/internal/token"
+	"leo2api/internal/uploadstore"
 )
 
 var openAIModelCatalog = []map[string]interface{}{
@@ -184,6 +185,7 @@ type Server struct {
 	TokenMgr                *token.Manager
 	Config                  *config.Manager
 	GeneratedDir            string
+	UploadStore             *uploadstore.Store
 	LeonardoClient          *leonardo.Client
 	ReqLog                  *reqlog.Store
 	generatedStorageMu      sync.Mutex

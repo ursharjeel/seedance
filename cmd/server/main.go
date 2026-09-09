@@ -16,6 +16,7 @@ import (
 	"leo2api/internal/reqlog"
 	"leo2api/internal/store"
 	"leo2api/internal/token"
+	"leo2api/internal/uploadstore"
 )
 
 func main() {
@@ -30,6 +31,8 @@ func main() {
 	staticDir := filepath.Join(baseDir, "static")
 	generatedDir := filepath.Join(baseDir, "generated")
 	os.MkdirAll(generatedDir, 0o755)
+	uploadsDir := filepath.Join(baseDir, "uploads")
+	os.MkdirAll(uploadsDir, 0o755)
 
 	// Load config
 	cfg := config.Global()
@@ -99,10 +102,19 @@ func main() {
 		log.Printf("[reqlog] expired %d stale running log(s) during startup", expired)
 	}
 
+	uploadStore, uploadStoreErr := uploadstore.Open(uploadsDir)
+	if uploadStoreErr != nil {
+		log.Printf("[upload] warning: local upload store unavailable: %v", uploadStoreErr)
+	}
+	if uploadStore != nil {
+		log.Printf("[upload] local upload store ready: dir=%s entries=%d", uploadsDir, uploadStore.Count())
+	}
+
 	srv := &handler.Server{
 		TokenMgr:       tokenMgr,
 		Config:         cfg,
 		GeneratedDir:   generatedDir,
+		UploadStore:    uploadStore,
 		LeonardoClient: leoClient,
 		ReqLog:         reqLogStore,
 	}
@@ -203,6 +215,7 @@ func main() {
 	mux.HandleFunc("/api/v1/leonardo/status", srv.HandleLeonardoStatus)
 	mux.HandleFunc("/api/v1/leonardo/upload-image", srv.HandleLeonardoUploadImage)
 	mux.HandleFunc("/api/v1/leonardo/upload-audio", srv.HandleLeonardoUploadAudio)
+	mux.HandleFunc("/api/v1/leonardo/upload-video", srv.HandleLeonardoUploadVideo)
 
 	// ─── Static files (admin UI) ───
 	if info, statErr := os.Stat(staticDir); statErr == nil && info.IsDir() {

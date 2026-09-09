@@ -22,6 +22,7 @@ import (
 	"leo2api/internal/provider/leonardo"
 	"leo2api/internal/reqlog"
 	"leo2api/internal/token"
+	"leo2api/internal/uploadstore"
 )
 
 // HandleAuthLogin handles POST /api/v1/auth/login.
@@ -2738,6 +2739,14 @@ func (s *Server) HandleLeonardoUploadImage(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	s.saveLocalUpload(uploadstore.Meta{
+		ID:          imageID,
+		Kind:        uploadstore.KindImage,
+		Ext:         ext,
+		ContentType: contentType,
+		OriginalFilename: header.Filename,
+	}, imageData)
+
 	writeJSON(w, 200, map[string]interface{}{
 		"ok":       true,
 		"image_id": imageID,
@@ -2813,6 +2822,14 @@ func (s *Server) HandleLeonardoUploadAudio(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	s.saveLocalUpload(uploadstore.Meta{
+		ID:               audioID,
+		Kind:             uploadstore.KindAudio,
+		Ext:              ext,
+		ContentType:      contentType,
+		OriginalFilename: header.Filename,
+	}, audioData)
+
 	writeJSON(w, 200, map[string]interface{}{
 		"ok":       true,
 		"audio_id": audioID,
@@ -2821,9 +2838,98 @@ func (s *Server) HandleLeonardoUploadAudio(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// HandleLeonardoUploadVideo handles POST /api/v1/leonardo/upload-video.
+// Accepts multipart form with "file" field and optional "token_id".
+// Returns the uploaded video ID for use in video_reference.
+func (s *Server) HandleLeonardoUploadVideo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		writeJSON(w, 405, map[string]string{"detail": "method not allowed"})
+		return
+	}
+	if s.LeonardoClient == nil {
+		writeJSON(w, 500, map[string]string{"detail": "Leonardo client not initialized"})
+		return
+	}
+
+	if err := r.ParseMultipartForm(maxRemoteVideoBytes); err != nil {
+		writeJSON(w, 400, map[string]string{"detail": "failed to parse form: " + err.Error()})
+		return
+	}
+
+	tokenID := r.FormValue("token_id")
+	session, _ := s.getLeonardoSession(tokenID)
+	if session == nil {
+		writeJSON(w, 404, map[string]string{"detail": "Leonardo token not found"})
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"detail": "file is required"})
+		return
+	}
+	defer file.Close()
+
+	videoData, err := io.ReadAll(io.LimitReader(file, maxRemoteVideoBytes+1))
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"detail": "failed to read file"})
+		return
+	}
+	if len(videoData) > maxRemoteVideoBytes {
+		writeJSON(w, 400, map[string]string{"detail": fmt.Sprintf("video file exceeds %d MB limit", maxRemoteVideoBytes>>20)})
+		return
+	}
+
+	ext := videoExtFromURL(header.Filename)
+	if ext == "" {
+		contentType := strings.TrimSpace(header.Header.Get("Content-Type"))
+		if mediaType, _, err := mime.ParseMediaType(contentType); err == nil && mediaType != "" {
+			contentType = mediaType
+		}
+		ext = videoExtFromContentType(contentType)
+	}
+	if ext == "" {
+		writeJSON(w, 400, map[string]string{"detail": "unsupported video file type"})
+		return
+	}
+	contentType := strings.TrimSpace(header.Header.Get("Content-Type"))
+	if mediaType, _, err := mime.ParseMediaType(contentType); err == nil && mediaType != "" {
+		contentType = mediaType
+	}
+	if contentType == "" || !strings.HasPrefix(contentType, "video/") {
+		contentType = "video/" + strings.ToLower(strings.TrimPrefix(ext, "."))
+	}
+
+	videoID, err := s.uploadLeonardoVideoBytes(session, videoData, ext, contentType)
+	if err != nil {
+		writeJSON(w, 500, map[string]interface{}{"detail": err.Error()})
+		return
+	}
+
+	s.saveLocalUpload(uploadstore.Meta{
+		ID:               videoID,
+		Kind:             uploadstore.KindVideo,
+		Ext:              ext,
+		ContentType:      contentType,
+		OriginalFilename: header.Filename,
+	}, videoData)
+
+	writeJSON(w, 200, map[string]interface{}{
+		"ok":       true,
+		"video_id": videoID,
+		"type":     "UPLOADED",
+	})
+}
+
 func (s *Server) resolveLeonardoImageID(session *leonardo.TokenSession, id, remoteURL string, cache map[string]string) (string, error) {
 	imageID := strings.TrimSpace(id)
 	if imageID != "" {
+		if rehostedID, _, ok, err := s.rehostLocalUpload(session, imageID, uploadstore.KindImage, cache); ok || err != nil {
+			if err != nil {
+				return "", err
+			}
+			return rehostedID, nil
+		}
 		return imageID, nil
 	}
 
@@ -2876,6 +2982,16 @@ func (s *Server) resolveLeonardoVideoID(session *leonardo.TokenSession, id, remo
 func (s *Server) resolveLeonardoVideoRef(session *leonardo.TokenSession, id, remoteURL string, durationHint float64, cache map[string]string) (leonardo.VideoRef, error) {
 	videoID := strings.TrimSpace(id)
 	if videoID != "" {
+		if rehostedID, _, ok, err := s.rehostLocalUpload(session, videoID, uploadstore.KindVideo, cache); ok || err != nil {
+			if err != nil {
+				return leonardo.VideoRef{}, err
+			}
+			return leonardo.VideoRef{
+				ID:       rehostedID,
+				Type:     "UPLOADED",
+				Duration: durationHint,
+			}, nil
+		}
 		return leonardo.VideoRef{
 			ID:       videoID,
 			Type:     "UPLOADED",
@@ -2920,6 +3036,20 @@ func (s *Server) resolveLeonardoVideoRef(session *leonardo.TokenSession, id, rem
 func (s *Server) resolveLeonardoAudioRef(session *leonardo.TokenSession, id, remoteURL string, durationHint float64, cache map[string]string) (leonardo.AudioRef, error) {
 	audioID := strings.TrimSpace(id)
 	if audioID != "" {
+		if rehostedID, detectedDuration, ok, err := s.rehostLocalUpload(session, audioID, uploadstore.KindAudio, cache); ok || err != nil {
+			if err != nil {
+				return leonardo.AudioRef{}, err
+			}
+			// The uploaded media metadata is authoritative for aggregate H3 limits.
+			if detectedDuration > 0 {
+				durationHint = detectedDuration
+			}
+			return leonardo.AudioRef{
+				ID:       rehostedID,
+				Type:     "UPLOADED",
+				Duration: durationHint,
+			}, nil
+		}
 		return leonardo.AudioRef{
 			ID:       audioID,
 			Type:     "UPLOADED",
@@ -3173,6 +3303,62 @@ func (s *Server) uploadLeonardoAudioBytes(session *leonardo.TokenSession, audioD
 	}
 	log.Printf("[Leonardo] Audio upload ready: uploadID=%s status=%s duration=%.3fs url=%s", initResult.UploadID, uploadedMedia.Status, duration, uploadedMedia.URL)
 	return initResult.UploadID, duration, nil
+}
+
+// saveLocalUpload best-effort persists uploaded media bytes so references by
+// id can be re-hosted under whichever Leonardo account runs the generation.
+func (s *Server) saveLocalUpload(meta uploadstore.Meta, data []byte) {
+	if s == nil || s.UploadStore == nil || strings.TrimSpace(meta.ID) == "" {
+		return
+	}
+	if err := s.UploadStore.Save(meta, data); err != nil {
+		log.Printf("[upload] failed to persist %s %q locally: %v", meta.Kind, meta.ID, err)
+	}
+}
+
+// rehostLocalUpload re-uploads a locally stored media id under the given
+// session so generation uses an asset owned by the account running the job.
+// matched reports whether the id exists in the local store. When the store is
+// absent or the id is foreign (e.g. a Leonardo GENERATED asset), matched is
+// false and callers fall back to passing the id through unchanged.
+func (s *Server) rehostLocalUpload(session *leonardo.TokenSession, id string, kind uploadstore.Kind, cache map[string]string) (string, float64, bool, error) {
+	if s == nil || s.UploadStore == nil {
+		return "", 0, false, nil
+	}
+	id = strings.TrimSpace(id)
+	data, meta, ok := s.UploadStore.Load(id)
+	if !ok || meta.Kind != kind {
+		return "", 0, false, nil
+	}
+	if cache != nil {
+		if cachedID, hit := cache[id]; hit && cachedID != "" {
+			return cachedID, 0, true, nil
+		}
+	}
+
+	var (
+		uploadedID string
+		duration   float64
+		err        error
+	)
+	switch kind {
+	case uploadstore.KindImage:
+		uploadedID, err = s.uploadLeonardoImageBytes(session, data, meta.Ext, meta.ContentType)
+	case uploadstore.KindAudio:
+		uploadedID, duration, err = s.uploadLeonardoAudioBytes(session, data, meta.Ext, meta.ContentType, meta.OriginalFilename)
+	case uploadstore.KindVideo:
+		uploadedID, err = s.uploadLeonardoVideoBytes(session, data, meta.Ext, meta.ContentType)
+	default:
+		return "", 0, false, nil
+	}
+	if err != nil {
+		return "", 0, true, fmt.Errorf("rehost stored %s %q: %w", kind, id, err)
+	}
+	if cache != nil {
+		cache[id] = uploadedID
+	}
+	log.Printf("[Leonardo] rehosted stored %s %q under the generation session", kind, id)
+	return uploadedID, duration, true, nil
 }
 
 func (s *Server) downloadRemoteImage(remoteURL string) ([]byte, string, string, error) {
